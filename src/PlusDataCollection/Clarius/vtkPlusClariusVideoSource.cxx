@@ -196,7 +196,7 @@ PlusStatus vtkPlusClariusVideoSource::ReadConfiguration(vtkXMLDataElement* rootC
     if (tiltSensorWestAxisIndex < 0 || tiltSensorWestAxisIndex > 2)
     {
       LOG_ERROR("TiltSensorWestAxisIndex is invalid. Specified value: " << tiltSensorWestAxisIndex << ". Valid values: 0, 1, 2. Keep using the default value: "
-                << this->TiltSensorWestAxisIndex);
+        << this->TiltSensorWestAxisIndex);
     }
     else
     {
@@ -210,7 +210,7 @@ PlusStatus vtkPlusClariusVideoSource::ReadConfiguration(vtkXMLDataElement* rootC
     if (FilteredTiltSensorWestAxisIndex < 0 || FilteredTiltSensorWestAxisIndex > 2)
     {
       LOG_ERROR("FilteredTiltSensorWestAxisIndex is invalid. Specified value: " << FilteredTiltSensorWestAxisIndex << ". Valid values: 0, 1, 2. Keep using the default value: "
-                << this->FilteredTiltSensorWestAxisIndex);
+        << this->FilteredTiltSensorWestAxisIndex);
     }
     else
     {
@@ -326,7 +326,7 @@ PlusStatus vtkPlusClariusVideoSource::NotifyConfigured()
   if (device->OutputChannels.size() > 1)
   {
     LOG_WARNING("vtkPlusClarius is expecting one output channel and there are " <<
-                this->OutputChannels.size() << " channels. First output channel will be used.");
+      this->OutputChannels.size() << " channels. First output channel will be used.");
   }
 
   if (device->OutputChannels.empty())
@@ -447,15 +447,15 @@ PlusStatus vtkPlusClariusVideoSource::InternalConnect()
     try
     {
       if (clariusInitListener(argc, argv, path,
-                              processedImageCallbackPtr,
-                              rawDataCallBackPtr,
-                              freezeCallBackFnPtr,
-                              buttonCallBackFnPtr,
-                              progressCallBackFnPtr,
-                              errorCallBackFnPtr,
-                              BLOCKINGCALL,
-                              FrameWidth,
-                              FrameHeight) < 0)
+        processedImageCallbackPtr,
+        rawDataCallBackPtr,
+        freezeCallBackFnPtr,
+        buttonCallBackFnPtr,
+        progressCallBackFnPtr,
+        errorCallBackFnPtr,
+        BLOCKINGCALL,
+        FrameWidth,
+        FrameHeight) < 0)
       {
         return PLUS_FAIL;
       }
@@ -526,7 +526,7 @@ PlusStatus vtkPlusClariusVideoSource::InternalConnect()
   else
   {
     LOG_DEBUG("Scanner already connected to IP address=" << device->IpAddress
-              << " TCP Port Number =" << device->TcpPort << "Streaming Image at UDP Port=" << device->UdpPort);
+      << " TCP Port Number =" << device->TcpPort << "Streaming Image at UDP Port=" << device->UdpPort);
     device->Connected = 1;
     return PLUS_SUCCESS;
   }
@@ -612,13 +612,13 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
   }
 
   LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
-            << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
+    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
 
   // Check if still connected
   if (device->Connected == 0)
   {
     LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
-              << " port = " << device->TcpPort);
+      << " port = " << device->TcpPort);
     return;
   }
 
@@ -646,14 +646,14 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
   int frameBufferBytesPerPixel = (nfo->bitsPerPixel / 8);
   if (!device->DataSourceInitialized)
   {
-    bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
+  bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
     if (bModeSource->GetImageType() == US_IMG_BRIGHTNESS)
     {
       bModeSource->SetNumberOfScalarComponents(1);
     }
     else
     {
-      bModeSource->SetNumberOfScalarComponents(frameBufferBytesPerPixel);
+  bModeSource->SetNumberOfScalarComponents(frameBufferBytesPerPixel);
     }
     device->ColorImage.resize(nfo->width * nfo->height * frameBufferBytesPerPixel * sizeof(unsigned char));
     device->GrayImage.resize(nfo->width * nfo->height * 1 * sizeof(unsigned char));
@@ -694,6 +694,8 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
     }
   }
 
+  igsioFieldMapType customField;
+  customField["micronsPerPixel"]= std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND,std::to_string(nfo->micronsPerPixel));
   unsigned char* image(device->ColorImage.data());
   if (bModeSource->GetImageType() == US_IMG_BRIGHTNESS)
   {
@@ -706,7 +708,7 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
   bModeSource->AddItem(
     image, // pointer to char array
     bModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-    // Set to UN to keep the orientation of the image the same as on tablet
+                                         // Set to UN to keep the orientation of the image the same as on tablet
     bModeSource->GetInputFrameSize(),
     VTK_UNSIGNED_CHAR,
     frameBufferBytesPerPixel,
@@ -714,7 +716,9 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
     0,
     device->FrameNumber,
     converted_timestamp,
-    converted_timestamp);
+    converted_timestamp,
+    &customField
+);
 
   for (int i = 0; i < npos; i++)
   {
@@ -864,13 +868,13 @@ void vtkPlusClariusVideoSource::RawImageCallback(const void* newImage, const Cla
   }
 
   LOG_TRACE("New raw image (" << newImage << "): " << nfo->lines << " lines using " << nfo->samples << " samples, @ " << nfo->bitsPerSample << " bits."
-            << nfo->axialSize << " axial microns per sample, " << nfo->lateralSize << " lateral microns per line.");
+    << nfo->axialSize << " axial microns per sample, " << nfo->lateralSize << " lateral microns per line.");
 
   // Check if still connected
   if (device->Connected == 0)
   {
     LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
-              << " port = " << device->TcpPort);
+      << " port = " << device->TcpPort);
     return;
   }
 
@@ -941,7 +945,7 @@ void vtkPlusClariusVideoSource::RawImageCallback(const void* newImage, const Cla
   rfModeSource->AddItem(
     (void*)newImage, // pointer to char array
     rfModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-    // Set to UN to keep the orientation of the image the same as on tablet
+                                              // Set to UN to keep the orientation of the image the same as on tablet
     rfModeSource->GetInputFrameSize(),
     pixelType,
     1,
