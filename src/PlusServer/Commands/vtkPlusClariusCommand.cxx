@@ -7,7 +7,7 @@ See License.txt for details.
 #include "PlusConfigure.h"
 #include "vtkPlusDataCollector.h"
 #include "vtkPlusClariusCommand.h"
-#include "Clarius/vtkPlusClarius.h"
+#include "Clarius/vtkPlusClariusVideoSource.h"
 
 #include "vtkImageData.h"
 #include "vtkDICOMImageReader.h"
@@ -79,7 +79,7 @@ PlusStatus vtkPlusClariusCommand::ReadConfiguration(vtkXMLDataElement* aConfig)
   XML_READ_BOOL_ATTRIBUTE_OPTIONAL(CompressRawData, aConfig);
   XML_READ_STRING_ATTRIBUTE_OPTIONAL(ClariusDeviceId, aConfig);
   XML_READ_STRING_ATTRIBUTE_OPTIONAL(OutputFilename, aConfig);
-  XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, RawDataLastNSeconds, aConfig); 
+  XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, RawDataLastNSeconds, aConfig);
 
   return PLUS_SUCCESS;
 }
@@ -113,7 +113,7 @@ PlusStatus vtkPlusClariusCommand::Execute()
     return PLUS_FAIL;
   }
 
-  vtkPlusClarius* clariusDevice = this->GetClariusDevice();
+  vtkPlusClariusVideoSource* clariusDevice = this->GetClariusDevice();
   if (clariusDevice == NULL)
   {
     this->QueueCommandResponse(PLUS_FAIL, std::string("Clarius command failed: device ")
@@ -140,7 +140,7 @@ PlusStatus vtkPlusClariusCommand::Execute()
 }
 
 //----------------------------------------------------------------------------
-vtkPlusClarius* vtkPlusClariusCommand::GetClariusDevice()
+vtkPlusClariusVideoSource* vtkPlusClariusCommand::GetClariusDevice()
 {
   vtkPlusDataCollector* dataCollector = GetDataCollector();
   if (dataCollector == NULL)
@@ -158,7 +158,7 @@ vtkPlusClarius* vtkPlusClariusCommand::GetClariusDevice()
       return NULL;
     }
     // device found
-    vtkPlusClarius* ClariusDevice = vtkPlusClarius::SafeDownCast(device);
+    vtkPlusClariusVideoSource* ClariusDevice = vtkPlusClariusVideoSource::SafeDownCast(device);
     if (ClariusDevice == NULL)
     {
       // wrong type
@@ -172,7 +172,7 @@ vtkPlusClarius* vtkPlusClariusCommand::GetClariusDevice()
     // No Clarius device id is specified, auto-detect the first one and use that
     for (DeviceCollectionConstIterator it = dataCollector->GetDeviceConstIteratorBegin(); it != dataCollector->GetDeviceConstIteratorEnd(); ++it)
     {
-      vtkPlusClarius* ClariusDevice = vtkPlusClarius::SafeDownCast(*it);
+      vtkPlusClariusVideoSource* ClariusDevice = vtkPlusClariusVideoSource::SafeDownCast(*it);
       if (ClariusDevice != NULL)
       {
         // found a recording device

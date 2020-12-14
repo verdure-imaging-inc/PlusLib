@@ -854,11 +854,11 @@ IF(PLUS_USE_CLARIUS)
   FIND_PACKAGE(CLARIUS REQUIRED)
 
   SET(CLARIUS_SRCS
-    Clarius/vtkPlusClarius.cxx
+    Clarius/vtkPlusClariusVideoSource.cxx
     )
   IF(MSVC OR ${CMAKE_GENERATOR} MATCHES "Xcode")
     SET(CLARIUS_HDRS
-      Clarius/vtkPlusClarius.h
+      Clarius/vtkPlusClariusVideoSource.h
       )
   ENDIF()
 

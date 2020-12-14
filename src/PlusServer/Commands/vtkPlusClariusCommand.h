@@ -12,7 +12,7 @@
 #include "vtkPlusCommand.h"
 #include "vtkIGSIOTransformRepository.h"
 
-class vtkPlusClarius;
+class vtkPlusClariusVideoSource;
 
 /*!
   \class vtkPlusClariusCommand
@@ -73,7 +73,7 @@ public:
   vtkSetMacro(RawDataLastNSeconds, double);
 
 protected:
-  vtkPlusClarius* GetClariusDevice();
+  vtkPlusClariusVideoSource* GetClariusDevice();
 
   vtkPlusClariusCommand();
   virtual ~vtkPlusClariusCommand();

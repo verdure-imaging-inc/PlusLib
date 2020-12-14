@@ -10,7 +10,7 @@
   \ingroup PlusLibDataCollection
 */
 #include "PlusConfigure.h"
-#include "vtkPlusClarius.h"
+#include "vtkPlusClariusVideoSource.h"
 #include "vtkPlusDataSource.h"
 #include "vtkCallbackCommand.h"
 #include "vtkChartXY.h"
@@ -136,9 +136,9 @@ vtkStandardNewMacro(vtkExtractImageRow);
 class vtkMyPlotCallback : public vtkCommand
 {
 public:
-  static vtkMyPlotCallback *New() { return new vtkMyPlotCallback; }
+  static vtkMyPlotCallback* New() { return new vtkMyPlotCallback; }
 
-  virtual void Execute(vtkObject *caller, unsigned long eventId, void* callData)
+  virtual void Execute(vtkObject* caller, unsigned long eventId, void* callData)
   {
     if (eventId == vtkCommand::KeyPressEvent)
     {
@@ -155,9 +155,9 @@ public:
     m_Interactor->CreateTimer(VTKI_TIMER_UPDATE);
   }
 
-  vtkRenderWindowInteractor *m_Interactor;
-  vtkContextView *m_Viewer;
-  vtkExtractImageRow *m_ImageToTableAdaptor;
+  vtkRenderWindowInteractor* m_Interactor;
+  vtkContextView* m_Viewer;
+  vtkExtractImageRow* m_ImageToTableAdaptor;
 
 private:
 
@@ -170,7 +170,7 @@ private:
 };
 
 //----------------------------------------------------------------------------
-void TestLinePlot(vtkPlusClarius *ClariusDevice)
+void TestLinePlot(vtkPlusClariusVideoSource* ClariusDevice)
 {
   // Set up a 2D scene, add an XY chart to it
   vtkSmartPointer<vtkContextView> view = vtkSmartPointer<vtkContextView>::New();
@@ -184,7 +184,7 @@ void TestLinePlot(vtkPlusClarius *ClariusDevice)
   imageToTableAdaptor->Update();
 
   // Add multiple line plots, setting the colors etc
-  vtkPlot *line = chart->AddPlot(vtkChart::LINE);
+  vtkPlot* line = chart->AddPlot(vtkChart::LINE);
   line->SetInputData(imageToTableAdaptor->GetOutput(), 0, 1);
   line->SetColor(0, 255, 0, 255);
   line->SetWidth(1.0);
@@ -210,9 +210,9 @@ void TestLinePlot(vtkPlusClarius *ClariusDevice)
 class vtkMyCallback : public vtkCommand
 {
 public:
-  static vtkMyCallback *New() { return new vtkMyCallback; }
+  static vtkMyCallback* New() { return new vtkMyCallback; }
 
-  virtual void Execute(vtkObject *caller, unsigned long, void*)
+  virtual void Execute(vtkObject* caller, unsigned long, void*)
   {
     m_Viewer->Render();
 
@@ -220,8 +220,8 @@ public:
     m_Interactor->CreateTimer(VTKI_TIMER_UPDATE);
   }
 
-  vtkRenderWindowInteractor *m_Interactor;
-  vtkImageViewer *m_Viewer;
+  vtkRenderWindowInteractor* m_Interactor;
+  vtkImageViewer* m_Viewer;
 
 private:
 
@@ -262,7 +262,7 @@ int main(int argc, char* argv[])
   vtkPlusLogger::Instance()->SetLogLevel(5);
 
 
-  vtkSmartPointer<vtkPlusClarius> ClariusDevice = vtkSmartPointer<vtkPlusClarius>::New();
+  vtkSmartPointer<vtkPlusClariusVideoSource> ClariusDevice = vtkSmartPointer<vtkPlusClariusVideoSource>::New();
   ClariusDevice->SetDeviceId("VideoDevice");
 
   // Read config file
@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
   iren->SetRenderWindow(viewer->GetRenderWindow());
   viewer->SetupInteractor(iren);
 
-  viewer->Render();	//must be called after iren and viewer are linked or there will be problems
+  viewer->Render(); //must be called after iren and viewer are linked or there will be problems
 
   // Establish timer event and create timer to update the live image
   vtkSmartPointer<vtkMyCallback> call = vtkSmartPointer<vtkMyCallback>::New();

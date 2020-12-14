@@ -19,13 +19,13 @@
 #include <stdio.h>
 #include <fstream>
 
-// Clarius Includes
-#include "listen.h"
-
 // OpenCV includes
 #include <opencv2/imgproc.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
+
+// Clarius Includes
+#include <listen.h>
 
 class AhrsAlgo;
 
@@ -36,20 +36,19 @@ This class talks with a Clarius Scanner over the Clarius API.
 Requires PLUS_USE_CLARIUS option in CMake.
  \ingroup PlusLibDataCollection
 */
-class vtkPlusDataCollectionExport vtkPlusClarius : public vtkPlusUsDevice
-  /*vtkPlusCLARIUS is a subclass of vtkPlusDevice*/
+class vtkPlusDataCollectionExport vtkPlusClariusVideoSource : public vtkPlusUsDevice
 {
 public:
-  vtkTypeMacro(vtkPlusClarius, vtkPlusDevice);
+  vtkTypeMacro(vtkPlusClariusVideoSource, vtkPlusDevice);
   /*! This is a singleton pattern New. There will only be ONE
   reference to a vtkPlusClarius object per process. Clients that
   call this must call Delete on the object so that the reference
   counting will work. The single instance will be unreferenced
   when the program exits. */
-  static vtkPlusClarius* New();
+  static vtkPlusClariusVideoSource* New();
 
   /*! return the singleton instance with no reference counting */
-  static vtkPlusClarius* GetInstance();
+  static vtkPlusClariusVideoSource* GetInstance();
 
   void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
 
@@ -126,8 +125,8 @@ public:
   vtkGetStdStringMacro(RawDataOutputFilename);
 
 protected:
-  vtkPlusClarius();
-  ~vtkPlusClarius();
+  vtkPlusClariusVideoSource();
+  ~vtkPlusClariusVideoSource();
 
   virtual PlusStatus InternalConnect();
   virtual PlusStatus InternalDisconnect();
@@ -142,7 +141,7 @@ protected:
   unsigned int TcpPort;
   int UdpPort;
   std::string IpAddress;
-  std::string PathToSecKey; // path to security key, required by the clarius api
+  std::string PathToSecKey; // path to security key, required by the Clarius API
   std::ofstream RawImuDataStream;
   std::string ImuOutputFileName;
   int FrameWidth;
@@ -162,7 +161,7 @@ protected:
   void* RawDataPointer;
   std::string RawDataOutputFilename;
 
-  static vtkPlusClarius* instance;
+  static vtkPlusClariusVideoSource* instance;
 
   static void ErrorFn(const char* err);
   static void FreezeFn(int val);
@@ -184,7 +183,6 @@ protected:
   */
   void AllocateRawData(int size);
 
-  static void NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
   static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
   static void RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
 
@@ -241,6 +239,13 @@ protected:
   */
   int TiltSensorWestAxisIndex;
   int FilteredTiltSensorWestAxisIndex;
+
+  // Only initalize the buffers once
+  bool DataSourceInitialized;
+
+  // Color image buffer
+  std::vector<unsigned char> ColorImage;
+  std::vector<unsigned char> GrayImage;
 };
 
 #endif //_VTKPLUSCLARIUS_H
