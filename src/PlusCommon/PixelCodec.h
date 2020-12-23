@@ -221,7 +221,7 @@ public:
         }
         break;
       case PixelEncoding_RGBA32:
-        if (outputOrdering == ComponentOrder_RGBA)
+        if (outputOrdering == ComponentOrder_RGB)
         {
           RGBA32ToRGB24(width, height, s, d);
         }

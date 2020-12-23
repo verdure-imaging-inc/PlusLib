@@ -643,7 +643,6 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
   }
 
   // Set Image Properties
-  int frameBufferBytesPerPixel = (nfo->bitsPerPixel / 8);
   if (!device->DataSourceInitialized)
   {
     bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
@@ -653,16 +652,10 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
     }
     else
     {
-      bModeSource->SetNumberOfScalarComponents(frameBufferBytesPerPixel);
+      bModeSource->SetNumberOfScalarComponents(3);
     }
-    device->ColorImage.resize(nfo->width * nfo->height * frameBufferBytesPerPixel * sizeof(unsigned char));
+    device->ColorImage.resize(nfo->width * nfo->height * 3 * sizeof(unsigned char));
     device->GrayImage.resize(nfo->width * nfo->height * 1 * sizeof(unsigned char));
-  }
-
-  // need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
-  if (bModeSource->GetImageType() != US_IMG_BRIGHTNESS)
-  {
-    memcpy(device->ColorImage.data(), newImage, nfo->width * nfo->height * (nfo->bitsPerPixel / 8));
   }
 
   // the Clarius timestamp is in nanoseconds
@@ -695,30 +688,34 @@ void vtkPlusClariusVideoSource::ProcessedImageCallback(const void* newImage, con
   }
 
   igsioFieldMapType customField;
-  customField["micronsPerPixel"]= std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND,std::to_string(nfo->micronsPerPixel));
+  customField["micronsPerPixel"] = std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND, std::to_string(nfo->micronsPerPixel));
   unsigned char* image(device->ColorImage.data());
   if (bModeSource->GetImageType() == US_IMG_BRIGHTNESS)
   {
-    // Convert to gray
-    PixelCodec::ConvertToGray(PixelCodec::PixelEncoding_RGB24, nfo->width, nfo->height, device->ColorImage.data(), device->GrayImage.data());
-    frameBufferBytesPerPixel = 1;
+    // Convert to RGB from RGBA
+    PixelCodec::ConvertToBGR24(PixelCodec::ComponentOrder_RGB, PixelCodec::PixelEncoding_RGBA32, nfo->width, nfo->height, (unsigned char*)newImage, device->ColorImage.data());
     image = device->GrayImage.data();
+  }
+  else
+  {
+    // Convert to gray
+    PixelCodec::ConvertToGray(PixelCodec::PixelEncoding_RGBA32, nfo->width, nfo->height, (unsigned char*)newImage, device->GrayImage.data());
   }
 
   bModeSource->AddItem(
-    image, // pointer to char array
+    bModeSource->GetImageType() == US_IMG_BRIGHTNESS ? device->GrayImage.data() : device->ColorImage.data(), // pointer to char array
     bModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
     // Set to UN to keep the orientation of the image the same as on tablet
     bModeSource->GetInputFrameSize(),
     VTK_UNSIGNED_CHAR,
-    frameBufferBytesPerPixel,
-    US_IMG_BRIGHTNESS,
+    bModeSource->GetImageType() == US_IMG_BRIGHTNESS ? 1 : 3,
+    bModeSource->GetImageType(),
     0,
     device->FrameNumber,
     converted_timestamp,
     converted_timestamp,
     &customField
-);
+  );
 
   for (int i = 0; i < npos; i++)
   {

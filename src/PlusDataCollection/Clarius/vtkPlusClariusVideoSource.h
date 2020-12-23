@@ -31,7 +31,7 @@ class AhrsAlgo;
 
 /*!
 \class vtkPlusClarius
-\brief Interface to the Clarius ultrasound scans
+\brief Interface to the Clarius ultrasound scanners
 This class talks with a Clarius Scanner over the Clarius API.
 Requires PLUS_USE_CLARIUS option in CMake.
  \ingroup PlusLibDataCollection
@@ -240,7 +240,7 @@ protected:
   int TiltSensorWestAxisIndex;
   int FilteredTiltSensorWestAxisIndex;
 
-  // Only initalize the buffers once
+  // Only initialize the buffers once
   bool DataSourceInitialized;
 
   // Color image buffer

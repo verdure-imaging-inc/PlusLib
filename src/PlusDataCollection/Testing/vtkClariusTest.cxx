@@ -9,29 +9,35 @@
   \brief Test basic connection to the Clarius ultrasound probe
   \ingroup PlusLibDataCollection
 */
+
+// Local includes
 #include "PlusConfigure.h"
 #include "vtkPlusClariusVideoSource.h"
 #include "vtkPlusDataSource.h"
-#include "vtkCallbackCommand.h"
-#include "vtkChartXY.h"
-#include "vtkCommand.h"
-#include "vtkContextScene.h"
-#include "vtkContextView.h"
-#include "vtkFloatArray.h"
-#include "vtkImageData.h"
-#include "vtkImageViewer.h"
-#include "vtkInformation.h"
-#include "vtkInformationVector.h"
-#include "vtkPlot.h"
-#include "vtkRenderWindow.h"
-#include "vtkRenderWindowInteractor.h"
-#include "vtkRenderer.h"
-#include "vtkSmartPointer.h"
-#include "vtkTable.h"
-#include "vtkTableAlgorithm.h"
-#include "vtkXMLUtilities.h"
-#include "vtksys/CommandLineArguments.hxx"
+
+// OS includes
 #include <stdlib.h>
+
+// VTK includes
+#include <vtkCallbackCommand.h>
+#include <vtkChartXY.h>
+#include <vtkCommand.h>
+#include <vtkContextScene.h>
+#include <vtkContextView.h>
+#include <vtkFloatArray.h>
+#include <vtkImageData.h>
+#include <vtkImageViewer.h>
+#include <vtkInformation.h>
+#include <vtkInformationVector.h>
+#include <vtkPlot.h>
+#include <vtkRenderWindow.h>
+#include <vtkRenderWindowInteractor.h>
+#include <vtkRenderer.h>
+#include <vtkSmartPointer.h>
+#include <vtkTable.h>
+#include <vtkTableAlgorithm.h>
+#include <vtkXMLUtilities.h>
+#include <vtksys/CommandLineArguments.hxx>
 
 //----------------------------------------------------------------------------
 
