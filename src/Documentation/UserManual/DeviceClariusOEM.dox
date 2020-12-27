@@ -1,0 +1,36 @@
+/*!
+\page DeviceClariusOEM Clarius ultrasound systems (OEM API)
+
+\section ClariusOEMSupportedHwDevices Supported hardware devices
+
+- This device is used for image acquisition from Clarius ultrasound systems.
+- Link to manufacturer's website: https://clarius.com
+
+\section ClariusOEMSupportedPlatforms Supported platforms
+
+- \ref PackageWin32
+- \ref PackageWin64
+- \ref PackageLinux
+
+\section ClariusOEMConnection Clarius OEM Device Connection
+- Requires a connection to the same network as the Clarius
+- Directly connecting to the Clarius's network is possible, however it can easily become congested
+- It is recommended to use a local Wi-Fi network instead:
+  - <a href="https://support.clarius.com/hc/en-us/articles/360019514951-Connecting-to-the-Scanner-via-a-Local-Wi-Fi-Network">Establishing a local Wi-Fi connection</a>
+
+\section ClariusOEMConfigSettings Device configuration settings
+
+- \xmlAtt \ref DeviceType "Type" = \c "Clarius" \RequiredAtt
+- \xmlAtt \ref IpAddress \RequiredAtt
+- \xmlAtt \ref TcpPort \RequiredAtt
+- \xmlAtt \ref FrameWidth \OptionalAtt{640}
+- \xmlAtt \ref FrameHeight \OptionalAtt{480}
+- \xmlAtt \ref ImuEnabled \OptionalAtt{FALSE}
+- \xmlAtt \ref ImuOutputFileName \OptionalAtt{ClariusImuData.csv}
+- \xmlAtt \ref WriteImagesToDisk \OptionalAtt{"FALSE"}
+
+\section ClariusOEMExampleConfigFile Example configuration file PlusDeviceSet_Server_ClariusOEMVideoCapture.xml
+
+\include "ConfigFiles/PlusDeviceSet_Server_ClariusOEMVideoCapture.xml"
+
+*/

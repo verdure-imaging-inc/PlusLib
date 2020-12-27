@@ -217,6 +217,10 @@ See License.txt for details.
 #include "vtkPlusClarius.h"
 #endif
 
+#ifdef PLUS_USE_CLARIUS_OEM
+#include "vtkPlusClariusOEM.h"
+#endif
+
 //----------------------------------------------------------------------------
 
 vtkStandardNewMacro(vtkPlusDeviceFactory);
@@ -395,6 +399,10 @@ vtkPlusDeviceFactory::vtkPlusDeviceFactory()
 
 #ifdef PLUS_USE_CLARIUS
   RegisterDevice("Clarius", "vtkPlusClarius", (PointerToDevice)&vtkPlusClarius::New);
+#endif
+
+#ifdef PLUS_USE_CLARIUS_OEM
+  RegisterDevice("ClariusOEM", "vtkPlusClariusOEM", (PointerToDevice)&vtkPlusClariusOEM::New);
 #endif
 
 #ifdef PLUS_USE_STEAMVR

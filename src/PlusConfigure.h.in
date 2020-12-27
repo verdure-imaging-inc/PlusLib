@@ -108,6 +108,7 @@
 #cmakedefine PLUS_USE_WITMOTIONTRACKER
 #cmakedefine PLUS_USE_LEAPMOTION
 #cmakedefine PLUS_USE_CLARIUS
+#cmakedefine PLUS_USE_CLARIUS_OEM
 #cmakedefine PLUS_USE_STEAMVR
 
 #cmakedefine PLUS_USE_VP9

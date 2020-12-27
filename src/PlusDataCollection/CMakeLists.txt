@@ -63,6 +63,7 @@ IF(PLUS_USE_LEAPMOTION)
   OPTION(PLUS_TEST_LEAPMOTION "Enable testing for LeapMotion device" OFF)
 ENDIF()
 OPTION(PLUS_USE_CLARIUS "Provide support for Clarius ultrasound probes" OFF)
+OPTION(PLUS_USE_CLARIUS_OEM "Provide support for Clarius OEM SDK interface to Clarius Ultrasound devices." OFF)
 OPTION(PLUS_USE_STEAMVR "Provide support for the SteamVR tracking system" OFF)
 
 OPTION(PLUS_TEST_ULTRASONIX "Enable testing of acquisition from Ultrasonix ultrasound systems. Enable this only if an Ultrasonix device accessible from this computer." OFF)
@@ -880,6 +881,40 @@ IF(PLUS_USE_CLARIUS)
   LIST(APPEND ${PROJECT_NAME}_LIBS
     ${CLARIUS_LIB_DIR}/listen${CMAKE_STATIC_LIBRARY_SUFFIX}
     )
+ENDIF()
+
+# --------------------------------------------------------------------------
+# CLARIUS OEM SDK Support
+IF(PLUS_USE_CLARIUS_OEM)
+
+  FIND_PACKAGE(ClariusOEM REQUIRED)
+
+  SET(CLARIUS_OEM_SRCS
+    Clarius/vtkPlusClariusOEM.cxx
+    )
+  IF(MSVC OR ${CMAKE_GENERATOR} MATCHES "Xcode")
+    SET(CLARIUS_OEM_HDRS
+      Clarius/vtkPlusClariusOEM.h
+      )
+  ENDIF()
+
+  LIST(APPEND ${PROJECT_NAME}_HDRS
+    ${CLARIUS_OEM_HDRS}
+    )
+
+  LIST(APPEND ${PROJECT_NAME}_SRCS
+    ${CLARIUS_OEM_SRCS}
+    )
+
+  LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/Clarius
+    ${ClariusOEM_INCLUDE_DIRS}
+    )
+
+  LIST(APPEND ${PROJECT_NAME}_LIBS
+    ClariusOEM
+    )
+
 ENDIF()
 
 #--------------------------------------------------------------------------
@@ -2583,6 +2618,7 @@ source_group("Andor" FILES ${Andor_HDRS} ${Andor_SRCS})
 
 source_group("LeapMotion" FILES ${LeapMotion_HDRS} ${LeapMotion_SRCS})
 source_group("ClariusVideo" FILES ${CLARIUS_HDRS} ${CLARIUS_SRCS})
+source_group("ClariusOEM" FILES ${CLARIUS_OEM_HDRS} ${CLARIUS_OEM_SRCS})
 source_group("BlackMagic" FILES ${BlackMagicDeckLink_HDRS} ${BlackMagicDeckLink_SRCS})
 source_group("SteamVR" FILES ${STEAMVR_HDRS} ${STEAMVR_SRCS})
 
