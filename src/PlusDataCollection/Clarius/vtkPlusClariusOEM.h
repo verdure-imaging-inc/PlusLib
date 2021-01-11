@@ -20,7 +20,8 @@
 #include <fstream>
 
 // Clarius Includes
-#include "listen.h"
+#include "oem.h"
+#include "oem_def.h"
 
 // OpenCV includes
 #include <opencv2/imgproc.hpp>
@@ -31,42 +32,36 @@ class AhrsAlgo;
 
 /*!
 \class vtkPlusClariusOEM
-\brief Interface to the Clarius ultrasound scans
-This class talks with a Clarius Scanner over the Clarius API.
-Requires PLUS_USE_CLARIUS option in CMake.
+\brief Interface to the Clarius OEM API
+This class talks with a Clarius Scanner over the Clarius OEM API.
+Note: A license may be required from Clarius to access this API.
+Requires PLUS_USE_CLARIUS_OEM option in CMake.
  \ingroup PlusLibDataCollection
 */
 class vtkPlusDataCollectionExport vtkPlusClariusOEM : public vtkPlusUsDevice
-  /*vtkPlusClariusOEM is a subclass of vtkPlusDevice*/
 {
 public:
-  vtkTypeMacro(vtkPlusClariusOEM, vtkPlusDevice);
-  /*! This is a singleton pattern New. There will only be ONE
-  reference to a vtkPlusClariusOEM object per process. Clients that
-  call this must call Delete on the object so that the reference
-  counting will work. The single instance will be unreferenced
-  when the program exits. */
+  vtkTypeMacro(vtkPlusClariusOEM, vtkPlusUsDevice);
   static vtkPlusClariusOEM* New();
+  void PrintSelf(ostream& os, vtkIndent indent) override;
 
-  /*! return the singleton instance with no reference counting */
-  static vtkPlusClariusOEM* GetInstance();
-
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-
-  /*!
-  Probe to see to see if the device is connected to the
-  computer. This method should be overridden in subclasses.
-  */
-  virtual PlusStatus Probe();
+  /*! Probe to see to see if the device is connected to the
+  computer. This method should be overridden in subclasses. */
+  PlusStatus Probe() override;
 
   /*! Hardware device SDK version. This method should be overridden in subclasses. */
-  virtual std::string GetSdkVersion();
+  std::string GetSdkVersion() override;
+
+  /*! The IMU streaming is supported and raw IMU data is written to csv file, however interpreting imu data as tracking data is not supported*/
+  bool IsTracker() const override { return false; };
+
+  bool IsVirtual() const override { return false; };
 
   /*! Read configuration from xml data */
-  virtual PlusStatus ReadConfiguration(vtkXMLDataElement* config);
+  PlusStatus ReadConfiguration(vtkXMLDataElement* config) override;
 
   /*! Write configuration to xml data */
-  virtual PlusStatus WriteConfiguration(vtkXMLDataElement* config);
+  PlusStatus WriteConfiguration(vtkXMLDataElement* config) override;
 
   /*! Perform any completion tasks once configured
    a multi-purpose function which is called after all devices have been configured,
@@ -74,7 +69,21 @@ public:
    but before devices begin collecting data.
    This is the last chance for your device to raise an error about improper or insufficient configuration.
   */
-  virtual PlusStatus NotifyConfigured();
+  PlusStatus NotifyConfigured() override;
+
+protected:
+  PlusStatus InternalConnect() override;
+
+  PlusStatus InternalDisconnect() override;
+
+  PlusStatus InternalStartRecording() override;
+
+  PlusStatus InternalStopRecording() override;
+
+public:
+
+  /*! return the singleton instance with no reference counting */
+  static vtkPlusClariusOEM* GetInstance();
 
   /*!
   Request raw ultrasound data in the last N seconds
@@ -86,9 +95,6 @@ public:
   If both timestamps are zero, all available data will be requested
   */
   PlusStatus RequestRawData(long long startTimestampNanoSeconds, long long endTimestampNanoSeconds);
-
-  /*! The IMU streaming is supported and raw IMU data is written to csv file, however interpreting imu data as tracking data is not supported*/
-  bool IsTracker() const { return false; }
 
   vtkSetMacro(FrameHeight, unsigned int);
   vtkGetMacro(FrameHeight, unsigned int);
@@ -129,8 +135,7 @@ protected:
   vtkPlusClariusOEM();
   ~vtkPlusClariusOEM();
 
-  virtual PlusStatus InternalConnect();
-  virtual PlusStatus InternalDisconnect();
+
   PlusStatus WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime);
 
   /*!
@@ -164,10 +169,7 @@ protected:
 
   static vtkPlusClariusOEM* instance;
 
-  static void ErrorFn(const char* err);
-  static void FreezeFn(int val);
-  static void ProgressFn(int progress);
-  static void ButtonFn(int button, int clicks);
+
 
   /*!
   Callback function for raw data request
@@ -183,11 +185,34 @@ protected:
   Re-allocate memory to store raw ultrasound data
   */
   void AllocateRawData(int size);
+  
 
-  static void NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
-  static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+  // new func signatures
+  // TODO: add some documentation, move to PIMPL class?
+
+  static void ListFn(const char* list, int sz);
+
+  static void ConnectFn(int ret, int port, const char* status);
+  
+  static void CertFn(int daysValid);
+
+  static void PowerDownFn(int ret, int tm);
+
+  static void SwUpdateFn(int ret);
+
   static void RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+  
+  static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
 
+  static void ImagingFn(int ready, int imaging);
+
+  static void ButtonFn(int btn, int clicks);
+
+  static void ProgressFn(int progress);
+
+  static void ErrorFn(const char* msg);
+
+ // TODO: move to PIMPL class
   vtkPlusDataSource* AccelerometerTool;
   vtkPlusDataSource* GyroscopeTool;
   vtkPlusDataSource* MagnetometerTool;
@@ -243,4 +268,4 @@ protected:
   int FilteredTiltSensorWestAxisIndex;
 };
 
-#endif //_vtkPlusClariusOEM_H
+#endif

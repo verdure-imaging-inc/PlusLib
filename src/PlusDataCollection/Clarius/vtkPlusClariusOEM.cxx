@@ -51,9 +51,6 @@
 #include <unistd.h>
 #endif
 
-// Clarius API
-#include "listen.h"
-
 #define BLOCKINGCALL    nullptr
 #define DEFAULT_FRAME_WIDTH 640
 #define DEFAULT_FRAME_HEIGHT 480
@@ -130,10 +127,10 @@ vtkPlusClariusOEM::~vtkPlusClariusOEM()
 
   if (this->Connected)
   {
-    clariusDisconnect(BLOCKINGCALL);
+    cusOemDisconnect();
   }
 
-  int destroyed = clariusDestroyListener();
+  int destroyed = cusOemDestroy();
   if (destroyed != 0)
   {
     LOG_ERROR("Error destoying the listener");
@@ -420,19 +417,24 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     const char* path = device->PathToSecKey.c_str();
 
     // Callbacks
-    ClariusNewProcessedImageFn processedImageCallbackPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::ProcessedImageCallback);
-    ClariusNewRawImageFn rawDataCallBackPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::RawImageCallback);
-    ClariusFreezeFn freezeCallBackFnPtr = static_cast<ClariusFreezeFn>(&vtkPlusClariusOEM::FreezeFn);
-    ClariusButtonFn buttonCallBackFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::ButtonFn);
-    ClariusProgressFn progressCallBackFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::ProgressFn);
-    ClariusErrorFn errorCallBackFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::ErrorFn);
+    ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::ListFn);
+    ClariusConnectFn connectFnPtr = static_cast<ClariusConnectFn>(&vtkPlusClariusOEM::ConnectFn);
+    ClariusCertFn certFnPtr = static_cast<ClariusCertFn>(&vtkPlusClariusOEM::CertFn);
+    ClariusPowerDownFn powerDownFnPtr = static_cast<ClariusPowerDownFn>(&vtkPlusClariusOEM::PowerDownFn);
+    ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::SwUpdateFn);
+    ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::RawImageCallback);
+    ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::ProcessedImageCallback);
+    ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::ImagingFn);
+    ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::ButtonFn);
+    ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::ProgressFn);
+    ClariusErrorFn errorFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::ErrorFn);
 
     // No B-mode data sources. Disable B mode callback.
     std::vector<vtkPlusDataSource*> bModeSources;
     device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
     if (bModeSources.empty())
     {
-      processedImageCallbackPtr = nullptr;
+      newProcessedImageFnPtr = nullptr;
     }
 
     // No RF-mode data sources. Disable RF mode callback.
@@ -440,21 +442,28 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
     if (rfModeSources.empty())
     {
-      rawDataCallBackPtr = nullptr;
+      newRawImageFnPtr = nullptr;
     }
 
     try
     {
-      if (clariusInitListener(argc, argv, path,
-        processedImageCallbackPtr,
-        rawDataCallBackPtr,
-        freezeCallBackFnPtr,
-        buttonCallBackFnPtr,
-        progressCallBackFnPtr,
-        errorCallBackFnPtr,
-        BLOCKINGCALL,
+      int init_res = cusOemInit(
+        argc,
+        argv,
+        path,
+        connectFnPtr,
+        certFnPtr,
+        powerDownFnPtr,
+        newProcessedImageFnPtr,
+        newRawImageFnPtr,
+        imagingFnPtr,
+        buttonFnPtr,
+        errorFnPtr,
         FrameWidth,
-        FrameHeight) < 0)
+        FrameHeight
+      );
+
+      if (init_res < 0)
       {
         return PLUS_FAIL;
       }
@@ -479,7 +488,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     int isConnected = -1;
     const char* ip = device->IpAddress.c_str();
     try {
-      isConnected = clariusConnect(ip, device->TcpPort, BLOCKINGCALL);
+      isConnected = cusOemConnect(ip, device->TcpPort);
     }
     catch (const std::runtime_error& re)
     {
@@ -503,7 +512,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
       return PLUS_FAIL;
     }
 
-    device->UdpPort = clariusGetUdpPort();
+    /*device->UdpPort = clariusGetUdpPort();
     if (device->UdpPort != -1)
     {
       LOG_DEBUG("... Clarius device connected, streaming port: " << clariusGetUdpPort());
@@ -519,7 +528,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     {
       LOG_ERROR("... Clarius device connected but could not get valid udp port");
       return PLUS_FAIL;
-    }
+    }*/
   }
   else
   {
@@ -528,7 +537,58 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     device->Connected = 1;
     return PLUS_SUCCESS;
   }
+
+  return PLUS_FAIL;
 };
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::ListFn(const char* list, int sz)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::ConnectFn(int ret, int port, const char* status)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::CertFn(int daysValid)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::PowerDownFn(int ret, int tm)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::SwUpdateFn(int ret)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::ImagingFn(int ready, int imaging)
+{
+
+}
+
+//----------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InternalStartRecording()
+{
+  return PLUS_FAIL;
+}
+
+//----------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InternalStopRecording()
+{
+  return PLUS_FAIL;
+}
+
 
 //----------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalDisconnect()
@@ -537,7 +597,7 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device->GetConnected())
   {
-    if (clariusDisconnect(nullptr) < 0)
+    if (cusOemDisconnect() < 0)
     {
       LOG_ERROR("could not disconnect from scanner");
       return PLUS_FAIL;
@@ -566,22 +626,6 @@ void vtkPlusClariusOEM::ErrorFn(const char* err)
 }
 
 //----------------------------------------------------------------------------
-/*! callback for freeze state change
- * @param[in] val the freeze state value 1 = frozen, 0 = imaging */
-void vtkPlusClariusOEM::FreezeFn(int val)
-{
-  if (val)
-  {
-    LOG_INFO("Clarius Frozen");
-  }
-
-  else
-  {
-    LOG_INFO("Clarius Imaging");
-  }
-}
-
-//----------------------------------------------------------------------------
 /*! callback for readback progress
  * @pram[in] progress the readback process*/
 void vtkPlusClariusOEM::ProgressFn(int progress)
@@ -606,21 +650,21 @@ void vtkPlusClariusOEM::ButtonFn(int btn, int clicks)
  * @param[in] npos the # fo positional data points embedded with the frame
  * @param[in] pos the buffer of positional data
  * */
-void vtkPlusClariusOEM::NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
-{
-  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
-    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
-  if (npos)
-  {
-    for (auto i = 0; i < npos; i++)
-    {
-      LOG_TRACE("imu: " << i << ", time: " << pos[i].tm);
-      LOG_TRACE("accel: " << pos[i].ax << "," << pos[i].ay << "," << pos[i].az);
-      LOG_TRACE("gyro: " << pos[i].gx << "," << pos[i].gy << "," << pos[i].gz);
-      LOG_TRACE("magnet: " << pos[i].mx << "," << pos[i].my << "," << pos[i].mz);
-    }
-  }
-}
+//void vtkPlusClariusOEM::NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+//{
+//  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
+//    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
+//  if (npos)
+//  {
+//    for (auto i = 0; i < npos; i++)
+//    {
+//      LOG_TRACE("imu: " << i << ", time: " << pos[i].tm);
+//      LOG_TRACE("accel: " << pos[i].ax << "," << pos[i].ay << "," << pos[i].az);
+//      LOG_TRACE("gyro: " << pos[i].gx << "," << pos[i].gy << "," << pos[i].gz);
+//      LOG_TRACE("magnet: " << pos[i].mx << "," << pos[i].my << "," << pos[i].mz);
+//    }
+//  }
+//}
 
 //----------------------------------------------------------------------------
 void vtkPlusClariusOEM::ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
@@ -1045,9 +1089,9 @@ PlusStatus vtkPlusClariusOEM::RequestRawData(long long startTimestamp, long long
 
   this->IsReceivingRawData = true;
 
-  ClariusReturnFn returnFunction = (ClariusReturnFn)(&vtkPlusClariusOEM::RawDataRequestFn);
-  clariusRequestRawData(startTimestamp, endTimestamp, returnFunction);
-  return PLUS_SUCCESS;
+  //ClariusReturnFn returnFunction = (ClariusReturnFn)(&vtkPlusClariusOEM::RawDataRequestFn);
+  //clariusRequestRawData(startTimestamp, endTimestamp, returnFunction);
+  return PLUS_FAIL;
 }
 
 //----------------------------------------------------------------------------
@@ -1077,10 +1121,10 @@ PlusStatus vtkPlusClariusOEM::ReceiveRawData(int dataSize)
 {
   LOG_INFO("Receiving " << dataSize << " bytes of raw data");
 
-  ClariusReturnFn returnFunction = (ClariusReturnFn)(&vtkPlusClariusOEM::RawDataWriteFn);
-  this->AllocateRawData(dataSize);
-  clariusReadRawData(&this->RawDataPointer, returnFunction);
-  return PLUS_SUCCESS;
+  //ClariusReturnFn returnFunction = (ClariusReturnFn)(&vtkPlusClariusOEM::RawDataWriteFn);
+  //this->AllocateRawData(dataSize);
+  //clariusReadRawData(&this->RawDataPointer, returnFunction);
+  return PLUS_FAIL;
 }
 
 //----------------------------------------------------------------------------

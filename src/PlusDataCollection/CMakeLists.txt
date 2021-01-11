@@ -908,11 +908,15 @@ IF(PLUS_USE_CLARIUS_OEM)
 
   LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/Clarius
-    ${ClariusOEM_INCLUDE_DIRS}
     )
 
-  LIST(APPEND ${PROJECT_NAME}_LIBS
+  LIST(APPEND ${PROJECT_NAME}_PRIVATE_LIBS
     ClariusOEM
+    )
+
+  # copy the ClariusOEM dll to /bin/* directories
+  LIST(APPEND External_Libraries_Install
+    ${ClariusOEM_BINARY_PATH}
     )
 
 ENDIF()
@@ -1091,7 +1095,7 @@ ENDIF()
 
 #--------------------------------------------------------------------------
 # vkxio algortihms required (magnetometer, accelerometer, gyroscope)
-IF( PLUS_USE_PHIDGET_SPATIAL_TRACKER OR PLUS_USE_CLARIUS)
+IF( PLUS_USE_PHIDGET_SPATIAL_TRACKER OR PLUS_USE_CLARIUS OR PLUS_USE_CLARIUS_OEM)
   LIST(APPEND ${PROJECT_NAME}_LIBS
     vtkxio
     )
