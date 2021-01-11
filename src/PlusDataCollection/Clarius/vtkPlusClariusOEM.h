@@ -6,18 +6,9 @@
 #ifndef _VTKPLUSCLARIUSOEM_H
 #define _VTKPLUSCLARIUSOEM_H
 
-// Local Includes
-#include "vtkPlusConfig.h"
+// Local includes
 #include "vtkPlusDataCollectionExport.h"
-#include "vtkPlusDevice.h"
-#include "vtkPlusDataSource.h"
 #include "vtkPlusUsDevice.h"
-
-// System Includes
-#include <thread>
-#include <string>
-#include <stdio.h>
-#include <fstream>
 
 // Clarius Includes
 #include "oem.h"
@@ -185,32 +176,6 @@ protected:
   Re-allocate memory to store raw ultrasound data
   */
   void AllocateRawData(int size);
-  
-
-  // new func signatures
-  // TODO: add some documentation, move to PIMPL class?
-
-  static void ListFn(const char* list, int sz);
-
-  static void ConnectFn(int ret, int port, const char* status);
-  
-  static void CertFn(int daysValid);
-
-  static void PowerDownFn(int ret, int tm);
-
-  static void SwUpdateFn(int ret);
-
-  static void RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
-  
-  static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
-
-  static void ImagingFn(int ready, int imaging);
-
-  static void ButtonFn(int btn, int clicks);
-
-  static void ProgressFn(int progress);
-
-  static void ErrorFn(const char* msg);
 
  // TODO: move to PIMPL class
   vtkPlusDataSource* AccelerometerTool;
@@ -266,6 +231,9 @@ protected:
   */
   int TiltSensorWestAxisIndex;
   int FilteredTiltSensorWestAxisIndex;
+
+  class vtkInternal;
+  vtkInternal* Internal;
 };
 
 #endif

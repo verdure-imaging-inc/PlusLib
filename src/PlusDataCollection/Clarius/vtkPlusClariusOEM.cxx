@@ -6,11 +6,11 @@
 
 // Local includes
 #include "PlusConfigure.h"
-#include "PixelCodec.h"
 #include "vtkPlusChannel.h"
+#include "vtkPlusClariusOEM.h"
+#include "PixelCodec.h"
 #include "vtkPlusDataSource.h"
 #include "vtkPlusUsImagingParameters.h"
-#include "vtkPlusClariusOEM.h"
 
 // IGSIO includes
 #include <vtkIGSIOAccurateTimer.h>
@@ -26,16 +26,6 @@
 #include <vtkTransform.h>
 #include <vtkXMLUtilities.h>
 
-// std includes
-#include <stdio.h>
-#include <stdlib.h>
-#include <string>
-#include <iostream>
-#include <atomic>
-#include <thread>
-#include <vector>
-#include <fstream>
-
 // vtkxio includes
 #include "MadgwickAhrsAlgo.h"
 #include "MahonyAhrsAlgo.h"
@@ -44,12 +34,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
-
-#include <stdio.h>
-#ifdef _MSC_VER
-#else
-#include <unistd.h>
-#endif
 
 #define BLOCKINGCALL    nullptr
 #define DEFAULT_FRAME_WIDTH 640
@@ -62,6 +46,491 @@
 vtkPlusClariusOEM* vtkPlusClariusOEM::instance;
 
 //----------------------------------------------------------------------------
+// vtkInternal
+//----------------------------------------------------------------------------
+
+class vtkPlusClariusOEM::vtkInternal
+{
+public:
+  vtkPlusClariusOEM* External;
+
+  vtkInternal(vtkPlusClariusOEM* ext)
+    : External(ext)
+  {
+  }
+
+  virtual ~vtkInternal()
+  {
+  }
+
+protected:
+
+  friend class vtkPlusClariusOEM;
+
+  // Clarius callbacks
+  static void ListFn(const char* list, int sz);
+
+  static void ConnectFn(int ret, int port, const char* status);
+
+  static void CertFn(int daysValid);
+
+  static void PowerDownFn(int ret, int tm);
+
+  static void SwUpdateFn(int ret);
+
+  static void RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+
+  static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+
+  static void ImagingFn(int ready, int imaging);
+
+  static void ButtonFn(int btn, int clicks);
+
+  static void ProgressFn(int progress);
+
+  static void ErrorFn(const char* msg);
+
+  // helper methods
+
+  // member variables
+
+};
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::ListFn(const char* list, int sz)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* status)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::CertFn(int daysValid)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::PowerDownFn(int ret, int tm)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::SwUpdateFn(int ret)
+{
+
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+{
+  LOG_TRACE("vtkPlusClariusOEM::RawImageCallback");
+  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+  if (device == NULL)
+  {
+    LOG_ERROR("Clarius instance is NULL");
+    return;
+  }
+
+  LOG_TRACE("New raw image (" << newImage << "): " << nfo->lines << " lines using " << nfo->samples << " samples, @ " << nfo->bitsPerSample << " bits."
+    << nfo->axialSize << " axial microns per sample, " << nfo->lateralSize << " lateral microns per line.");
+
+  // Check if still connected
+  if (device->Connected == 0)
+  {
+    LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
+      << " port = " << device->TcpPort);
+    return;
+  }
+
+  if (newImage == NULL)
+  {
+    LOG_ERROR("No frame received by the device");
+    return;
+  }
+
+  vtkPlusDataSource* rfModeSource = nullptr;
+  std::vector<vtkPlusDataSource*> rfModeSources;
+  device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
+  if (!rfModeSources.empty())
+  {
+    rfModeSource = rfModeSources[0];
+  }
+  else
+  {
+    LOG_WARNING("Raw image was received, however no output RF video source was found.");
+    return;
+  }
+
+  // Set Image Properties
+  int pixelType = VTK_UNSIGNED_CHAR;
+  int frameBufferBytesPerSample = (nfo->bitsPerSample / 8);
+  switch (frameBufferBytesPerSample)
+  {
+  case VTK_SIZEOF_LONG_LONG:
+    pixelType = VTK_LONG_LONG;
+    break;
+  case VTK_SIZEOF_INT:
+    pixelType = VTK_UNSIGNED_INT;
+    break;
+  case VTK_SIZEOF_SHORT:
+    pixelType = VTK_UNSIGNED_SHORT;
+    break;
+  case VTK_SIZEOF_CHAR:
+  default:
+    pixelType = VTK_UNSIGNED_CHAR;
+    break;
+  }
+  rfModeSource->SetInputFrameSize(nfo->lines, nfo->samples, 1);
+  rfModeSource->SetPixelType(pixelType);
+  rfModeSource->SetImageType(US_IMG_RF_REAL);
+  rfModeSource->SetOutputImageOrientation(US_IMG_ORIENT_MF);
+
+  int frameSizeInBytes = nfo->lines * nfo->samples * frameBufferBytesPerSample;
+
+  // the clarius timestamp is in nanoseconds
+  device->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
+  // Get system time (elapsed time since last reboot), return Internal system time in seconds
+  double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
+  if (device->FrameNumber == 0)
+  {
+    device->SystemStartTimestamp = systemTime;
+    device->ClariusStartTimestamp = device->ClariusLastTimestamp;
+  }
+
+  // Need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
+  std::vector<char> imageData;
+  if (imageData.size() < static_cast<size_t>(frameSizeInBytes))
+  {
+    imageData.resize(static_cast<size_t>(frameSizeInBytes));
+  }
+  memcpy(imageData.data(), newImage, static_cast<size_t>(frameSizeInBytes));
+
+  double convertedTimestamp = device->SystemStartTimestamp + (device->ClariusLastTimestamp - device->ClariusStartTimestamp);
+  rfModeSource->AddItem(
+    (void*)newImage, // pointer to char array
+    rfModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
+                                              // Set to UN to keep the orientation of the image the same as on tablet
+    rfModeSource->GetInputFrameSize(),
+    pixelType,
+    1,
+    US_IMG_RF_REAL,
+    0,
+    device->FrameNumber,
+    convertedTimestamp,
+    convertedTimestamp);
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+{
+  LOG_TRACE("vtkPlusClariusOEM::ProcessedImageCallback");
+  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+  if (device == NULL)
+  {
+    LOG_ERROR("Clarius instance is NULL!!!");
+    return;
+  }
+
+
+  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
+    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
+
+  // Check if still connected
+  if (device->Connected == 0)
+  {
+    LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
+      << " port = " << device->TcpPort);
+    return;
+  }
+
+  if (newImage == NULL)
+  {
+    LOG_ERROR("No frame received by the device");
+    return;
+  }
+
+  // check if there exist active data source;
+  vtkPlusDataSource* bModeSource;
+  std::vector<vtkPlusDataSource*> bModeSources;
+  device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
+  if (!bModeSources.empty())
+  {
+    bModeSource = bModeSources[0];
+  }
+  else
+  {
+    LOG_WARNING("Processed image was received, however no output B-Mode video source was found.");
+    return;
+  }
+
+  // Set Image Properties
+  bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
+  int frameBufferBytesPerPixel = (nfo->bitsPerPixel / 8);
+  int frameSizeInBytes = nfo->width * nfo->height * frameBufferBytesPerPixel;
+  bModeSource->SetNumberOfScalarComponents(frameBufferBytesPerPixel);
+
+  // need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
+  std::vector<char> _image;
+  size_t img_sz = nfo->width * nfo->height * (nfo->bitsPerPixel / 8);
+  if (_image.size() < img_sz)
+  {
+    _image.resize(img_sz);
+  }
+  memcpy(_image.data(), newImage, img_sz);
+
+  // the clarius timestamp is in nanoseconds
+  device->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
+  // Get system time (elapsed time since last reboot), return Internal system time in seconds
+  double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
+  if (device->FrameNumber == 0)
+  {
+    device->SystemStartTimestamp = systemTime;
+    device->ClariusStartTimestamp = device->ClariusLastTimestamp;
+  }
+
+  // The timestamp that each image is tagged with is
+  // (system_start_time + current_clarius_time - clarius_start_time)
+  double converted_timestamp = device->SystemStartTimestamp + (device->ClariusLastTimestamp - device->ClariusStartTimestamp);
+  if (npos != 0)
+  {
+    device->WritePosesToCsv(nfo, npos, pos, device->FrameNumber, systemTime, converted_timestamp);
+  }
+
+  if (device->WriteImagesToDisk)
+  {
+    // create cvimg to write to disk
+    cv::Mat cvimg = cv::Mat(nfo->width, nfo->height, CV_8UC4);
+    cvimg.data = cvimg.data = (unsigned char*)_image.data();
+    if (cv::imwrite("Clarius_Image" + std::to_string(device->ClariusLastTimestamp) + ".bmp", cvimg) == false)
+    {
+      LOG_ERROR("ERROR writing clarius image" + std::to_string(device->ClariusLastTimestamp) + " to disk");
+    }
+  }
+
+  igsioFieldMapType customField;
+  customField["micronsPerPixel"] = std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND, std::to_string(nfo->micronsPerPixel));
+  bModeSource->AddItem(
+    _image.data(), // pointer to char array
+    bModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
+                                         // Set to UN to keep the orientation of the image the same as on tablet
+    bModeSource->GetInputFrameSize(),
+    VTK_UNSIGNED_CHAR,
+    frameBufferBytesPerPixel,
+    US_IMG_BRIGHTNESS,
+    0,
+    device->FrameNumber,
+    converted_timestamp,
+    converted_timestamp,
+    &customField
+  );
+
+  for (int i = 0; i < npos; i++)
+  {
+    double angularRate[3] = { pos[i].gx , pos[i].gy , pos[i].gz };
+    double magneticField[3] = { pos[i].mx , pos[i].my , pos[i].mz };
+    double acceleration[3] = { pos[i].ax , pos[i].ay , pos[i].az };
+
+    if (device->AccelerometerTool != NULL)
+    {
+      device->LastAccelerometerToTrackerTransform->Identity();
+      device->LastAccelerometerToTrackerTransform->SetElement(0, 3, acceleration[0]);
+      device->LastAccelerometerToTrackerTransform->SetElement(1, 3, acceleration[1]);
+      device->LastAccelerometerToTrackerTransform->SetElement(2, 3, acceleration[2]);
+      device->ToolTimeStampedUpdateWithoutFiltering(device->AccelerometerTool->GetId(), device->LastAccelerometerToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+    }
+    if (device->GyroscopeTool != NULL)
+    {
+      device->LastGyroscopeToTrackerTransform->Identity();
+      device->LastGyroscopeToTrackerTransform->SetElement(0, 3, angularRate[0]);
+      device->LastGyroscopeToTrackerTransform->SetElement(1, 3, angularRate[1]);
+      device->LastGyroscopeToTrackerTransform->SetElement(2, 3, angularRate[2]);
+      device->ToolTimeStampedUpdateWithoutFiltering(device->GyroscopeTool->GetId(), device->LastGyroscopeToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+    }
+    if (device->MagnetometerTool != NULL)
+    {
+      if (magneticField[0] > 1e100)
+      {
+        // magnetometer data is not available, use the last transform with an invalid status to not have any missing transform
+        device->ToolTimeStampedUpdateWithoutFiltering(device->MagnetometerTool->GetId(), device->LastMagnetometerToTrackerTransform, TOOL_INVALID, converted_timestamp, converted_timestamp);
+      }
+      else
+      {
+        // magnetometer data is valid
+        device->LastMagnetometerToTrackerTransform->Identity();
+        device->LastMagnetometerToTrackerTransform->SetElement(0, 3, magneticField[0]);
+        device->LastMagnetometerToTrackerTransform->SetElement(1, 3, magneticField[1]);
+        device->LastMagnetometerToTrackerTransform->SetElement(2, 3, magneticField[2]);
+        device->ToolTimeStampedUpdateWithoutFiltering(device->MagnetometerTool->GetId(), device->LastMagnetometerToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+      }
+    }
+
+    if (device->TiltSensorTool != NULL)
+    {
+      // Compose matrix that transforms the x axis to the input vector by rotations around two orthogonal axes
+      vtkSmartPointer<vtkTransform> transform = vtkSmartPointer<vtkTransform>::New();
+
+      double downVector_Sensor[4] = { acceleration[0], acceleration[1], acceleration[2], 0 }; // provided by the sensor
+      vtkMath::Normalize(downVector_Sensor);
+
+      igsioMath::ConstrainRotationToTwoAxes(downVector_Sensor, device->TiltSensorWestAxisIndex, device->LastTiltSensorToTrackerTransform);
+
+      device->ToolTimeStampedUpdateWithoutFiltering(device->TiltSensorTool->GetId(), device->LastTiltSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+    }
+
+    if (device->OrientationSensorTool != NULL)
+    {
+      if (magneticField[0] > 1e100)
+      {
+        // magnetometer data is not available, use the last transform with an invalid status to not have any missing transform
+        device->ToolTimeStampedUpdateWithoutFiltering(device->OrientationSensorTool->GetId(), device->LastOrientationSensorToTrackerTransform, TOOL_INVALID, converted_timestamp, converted_timestamp);
+      }
+      else
+      {
+        // magnetometer data is valid
+
+        //LOG_TRACE("samplingTime(msec)="<<1000.0*timeSinceLastAhrsUpdateSec<<", packetCount="<<count);
+        //LOG_TRACE("gyroX="<<std::fixed<<std::setprecision(2)<<std::setw(6)<<angularRate[0]<<", gyroY="<<angularRate[1]<<", gyroZ="<<angularRate[2]);
+        //LOG_TRACE("magX="<<std::fixed<<std::setprecision(2)<<std::setw(6)<<magneticField[0]<<", magY="<<magneticField[1]<<", magZ="<<magneticField[2]);
+
+        if (device->AhrsUseMagnetometer)
+        {
+          device->AhrsAlgo->UpdateWithTimestamp(
+            vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
+            acceleration[0], acceleration[1], acceleration[2],
+            magneticField[0], magneticField[1], magneticField[2], converted_timestamp);
+        }
+        else
+        {
+          device->AhrsAlgo->UpdateIMUWithTimestamp(
+            vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
+            acceleration[0], acceleration[1], acceleration[2], converted_timestamp);
+        }
+
+
+        double rotQuat[4] = { 0 };
+        device->AhrsAlgo->GetOrientation(rotQuat[0], rotQuat[1], rotQuat[2], rotQuat[3]);
+
+        double rotMatrix[3][3] = { 0 };
+        vtkMath::QuaternionToMatrix3x3(rotQuat, rotMatrix);
+
+        for (int c = 0; c < 3; c++)
+        {
+          for (int r = 0; r < 3; r++)
+          {
+            device->LastOrientationSensorToTrackerTransform->SetElement(r, c, rotMatrix[r][c]);
+          }
+        }
+
+        device->ToolTimeStampedUpdateWithoutFiltering(device->OrientationSensorTool->GetId(), device->LastOrientationSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+      }
+    }
+    if (device->FilteredTiltSensorTool != NULL)
+    {
+      device->FilteredTiltSensorAhrsAlgo->UpdateIMUWithTimestamp(
+        vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
+        acceleration[0], acceleration[1], acceleration[2], converted_timestamp);
+
+      double rotQuat[4] = { 0 };
+      device->AhrsAlgo->GetOrientation(rotQuat[0], rotQuat[1], rotQuat[2], rotQuat[3]);
+
+      double rotMatrix[3][3] = { 0 };
+      vtkMath::QuaternionToMatrix3x3(rotQuat, rotMatrix);
+
+      double filteredDownVector_Sensor[4] = { rotMatrix[2][0], rotMatrix[2][1], rotMatrix[2][2], 0 };
+      vtkMath::Normalize(filteredDownVector_Sensor);
+
+      igsioMath::ConstrainRotationToTwoAxes(filteredDownVector_Sensor, device->FilteredTiltSensorWestAxisIndex, device->LastFilteredTiltSensorToTrackerTransform);
+
+      device->ToolTimeStampedUpdateWithoutFiltering(device->FilteredTiltSensorTool->GetId(), device->LastFilteredTiltSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
+
+      // write back the results to the FilteredTiltSensor_AHRS algorithm
+      for (int c = 0; c < 3; c++)
+      {
+        for (int r = 0; r < 3; r++)
+        {
+          rotMatrix[r][c] = device->LastFilteredTiltSensorToTrackerTransform->GetElement(r, c);
+        }
+      }
+      double filteredTiltSensorRotQuat[4] = { 0 };
+      vtkMath::Matrix3x3ToQuaternion(rotMatrix, filteredTiltSensorRotQuat);
+      device->FilteredTiltSensorAhrsAlgo->SetOrientation(filteredTiltSensorRotQuat[0], filteredTiltSensorRotQuat[1], filteredTiltSensorRotQuat[2], filteredTiltSensorRotQuat[3]);
+    }
+  }
+
+  device->FrameNumber++;
+}
+
+//----------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::ImagingFn(int ready, int imaging)
+{
+
+}
+
+//----------------------------------------------------------------------------
+/*! callback for button clicks
+ * @param[in] btn 0 = up, 1 = down
+ * @param[in] clicks # of clicks performed*/
+void vtkPlusClariusOEM::vtkInternal::ButtonFn(int btn, int clicks)
+{
+  LOG_DEBUG("button: " << btn << "clicks: " << clicks << "%");
+}
+
+//----------------------------------------------------------------------------
+/*! callback for readback progress
+ * @pram[in] progress the readback process*/
+void vtkPlusClariusOEM::vtkInternal::ProgressFn(int progress)
+{
+  LOG_DEBUG("Download: " << progress << "%");
+}
+
+
+//----------------------------------------------------------------------------
+/*! callback for error messages
+ * @param[in] err the error message sent from the listener module
+ * */
+void vtkPlusClariusOEM::vtkInternal::ErrorFn(const char* err)
+{
+  LOG_ERROR("error: " << err);
+}
+
+
+
+//----------------------------------------------------------------------------
+/*! callback for a new image sent from the scanner
+ * @param[in] newImage a pointer to the raw image bits of
+ * @param[in] nfo the image properties
+ * @param[in] npos the # fo positional data points embedded with the frame
+ * @param[in] pos the buffer of positional data
+ * */
+ //void vtkPlusClariusOEM::NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+ //{
+ //  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
+ //    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
+ //  if (npos)
+ //  {
+ //    for (auto i = 0; i < npos; i++)
+ //    {
+ //      LOG_TRACE("imu: " << i << ", time: " << pos[i].tm);
+ //      LOG_TRACE("accel: " << pos[i].ax << "," << pos[i].ay << "," << pos[i].az);
+ //      LOG_TRACE("gyro: " << pos[i].gx << "," << pos[i].gy << "," << pos[i].gz);
+ //      LOG_TRACE("magnet: " << pos[i].mx << "," << pos[i].my << "," << pos[i].mz);
+ //    }
+ //  }
+ //}
+
+
+
+
+
+//----------------------------------------------------------------------------
+// vtkPlusClariusOEM definitions
+//----------------------------------------------------------------------------
 vtkPlusClariusOEM* vtkPlusClariusOEM::New()
 {
   if (instance == NULL)
@@ -73,7 +542,8 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::New()
 
 //----------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkPlusClariusOEM()
-  : TcpPort(-1)
+  : Internal(new vtkInternal(this))
+  , TcpPort(-1)
   , UdpPort(-1)
   , IpAddress("192.168.1.1")
   , FrameNumber(0)
@@ -417,17 +887,17 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     const char* path = device->PathToSecKey.c_str();
 
     // Callbacks
-    ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::ListFn);
-    ClariusConnectFn connectFnPtr = static_cast<ClariusConnectFn>(&vtkPlusClariusOEM::ConnectFn);
-    ClariusCertFn certFnPtr = static_cast<ClariusCertFn>(&vtkPlusClariusOEM::CertFn);
-    ClariusPowerDownFn powerDownFnPtr = static_cast<ClariusPowerDownFn>(&vtkPlusClariusOEM::PowerDownFn);
-    ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::SwUpdateFn);
-    ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::RawImageCallback);
-    ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::ProcessedImageCallback);
-    ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::ImagingFn);
-    ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::ButtonFn);
-    ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::ProgressFn);
-    ClariusErrorFn errorFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::ErrorFn);
+    ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
+    ClariusConnectFn connectFnPtr = static_cast<ClariusConnectFn>(&vtkPlusClariusOEM::vtkInternal::ConnectFn);
+    ClariusCertFn certFnPtr = static_cast<ClariusCertFn>(&vtkPlusClariusOEM::vtkInternal::CertFn);
+    ClariusPowerDownFn powerDownFnPtr = static_cast<ClariusPowerDownFn>(&vtkPlusClariusOEM::vtkInternal::PowerDownFn);
+    ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::vtkInternal::SwUpdateFn);
+    ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::vtkInternal::RawImageCallback);
+    ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::vtkInternal::ProcessedImageCallback);
+    ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::vtkInternal::ImagingFn);
+    ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::vtkInternal::ButtonFn);
+    ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::vtkInternal::ProgressFn);
+    ClariusErrorFn errorFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::vtkInternal::ErrorFn);
 
     // No B-mode data sources. Disable B mode callback.
     std::vector<vtkPlusDataSource*> bModeSources;
@@ -541,41 +1011,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   return PLUS_FAIL;
 };
 
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::ListFn(const char* list, int sz)
-{
-
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::ConnectFn(int ret, int port, const char* status)
-{
-
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::CertFn(int daysValid)
-{
-
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::PowerDownFn(int ret, int tm)
-{
-
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::SwUpdateFn(int ret)
-{
-
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::ImagingFn(int ready, int imaging)
-{
-
-}
 
 //----------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalStartRecording()
@@ -616,395 +1051,6 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
   }
 };
 
-//----------------------------------------------------------------------------
-/*! callback for error messages
- * @param[in] err the error message sent from the listener module
- * */
-void vtkPlusClariusOEM::ErrorFn(const char* err)
-{
-  LOG_ERROR("error: " << err);
-}
-
-//----------------------------------------------------------------------------
-/*! callback for readback progress
- * @pram[in] progress the readback process*/
-void vtkPlusClariusOEM::ProgressFn(int progress)
-{
-  LOG_DEBUG("Download: " << progress << "%");
-}
-
-//----------------------------------------------------------------------------
-/*! callback for button clicks
- * @param[in] btn 0 = up, 1 = down
- * @param[in] clicks # of clicks performed*/
-void vtkPlusClariusOEM::ButtonFn(int btn, int clicks)
-{
-  LOG_DEBUG("button: " << btn << "clicks: " << clicks << "%");
-}
-
-
-//----------------------------------------------------------------------------
-/*! callback for a new image sent from the scanner
- * @param[in] newImage a pointer to the raw image bits of
- * @param[in] nfo the image properties
- * @param[in] npos the # fo positional data points embedded with the frame
- * @param[in] pos the buffer of positional data
- * */
-//void vtkPlusClariusOEM::NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
-//{
-//  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
-//    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
-//  if (npos)
-//  {
-//    for (auto i = 0; i < npos; i++)
-//    {
-//      LOG_TRACE("imu: " << i << ", time: " << pos[i].tm);
-//      LOG_TRACE("accel: " << pos[i].ax << "," << pos[i].ay << "," << pos[i].az);
-//      LOG_TRACE("gyro: " << pos[i].gx << "," << pos[i].gy << "," << pos[i].gz);
-//      LOG_TRACE("magnet: " << pos[i].mx << "," << pos[i].my << "," << pos[i].mz);
-//    }
-//  }
-//}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
-{
-  LOG_TRACE("vtkPlusClariusOEM::ProcessedImageCallback");
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device == NULL)
-  {
-    LOG_ERROR("Clarius instance is NULL!!!");
-    return;
-  }
-
-
-  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
-    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
-
-  // Check if still connected
-  if (device->Connected == 0)
-  {
-    LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
-      << " port = " << device->TcpPort);
-    return;
-  }
-
-  if (newImage == NULL)
-  {
-    LOG_ERROR("No frame received by the device");
-    return;
-  }
-
-  // check if there exist active data source;
-  vtkPlusDataSource* bModeSource;
-  std::vector<vtkPlusDataSource*> bModeSources;
-  device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
-  if (!bModeSources.empty())
-  {
-    bModeSource = bModeSources[0];
-  }
-  else
-  {
-    LOG_WARNING("Processed image was received, however no output B-Mode video source was found.");
-    return;
-  }
-
-  // Set Image Properties
-  bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
-  int frameBufferBytesPerPixel = (nfo->bitsPerPixel / 8);
-  int frameSizeInBytes = nfo->width * nfo->height * frameBufferBytesPerPixel;
-  bModeSource->SetNumberOfScalarComponents(frameBufferBytesPerPixel);
-
-  // need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
-  std::vector<char> _image;
-  size_t img_sz = nfo->width * nfo->height * (nfo->bitsPerPixel / 8);
-  if (_image.size() < img_sz)
-  {
-    _image.resize(img_sz);
-  }
-  memcpy(_image.data(), newImage, img_sz);
-
-  // the clarius timestamp is in nanoseconds
-  device->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
-  // Get system time (elapsed time since last reboot), return Internal system time in seconds
-  double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
-  if (device->FrameNumber == 0)
-  {
-    device->SystemStartTimestamp = systemTime;
-    device->ClariusStartTimestamp = device->ClariusLastTimestamp;
-  }
-
-  // The timestamp that each image is tagged with is
-  // (system_start_time + current_clarius_time - clarius_start_time)
-  double converted_timestamp = device->SystemStartTimestamp + (device->ClariusLastTimestamp - device->ClariusStartTimestamp);
-  if (npos != 0)
-  {
-    device->WritePosesToCsv(nfo, npos, pos, device->FrameNumber, systemTime, converted_timestamp);
-  }
-
-  if (device->WriteImagesToDisk)
-  {
-    // create cvimg to write to disk
-    cv::Mat cvimg = cv::Mat(nfo->width, nfo->height, CV_8UC4);
-    cvimg.data = cvimg.data = (unsigned char*)_image.data();
-    if (cv::imwrite("Clarius_Image" + std::to_string(device->ClariusLastTimestamp) + ".bmp", cvimg) == false)
-    {
-      LOG_ERROR("ERROR writing clarius image" + std::to_string(device->ClariusLastTimestamp) + " to disk");
-    }
-  }
-
-  igsioFieldMapType customField;
-  customField["micronsPerPixel"]= std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND,std::to_string(nfo->micronsPerPixel));
-  bModeSource->AddItem(
-    _image.data(), // pointer to char array
-    bModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-                                         // Set to UN to keep the orientation of the image the same as on tablet
-    bModeSource->GetInputFrameSize(),
-    VTK_UNSIGNED_CHAR,
-    frameBufferBytesPerPixel,
-    US_IMG_BRIGHTNESS,
-    0,
-    device->FrameNumber,
-    converted_timestamp,
-    converted_timestamp,
-    &customField
-);
-
-  for (int i = 0; i < npos; i++)
-  {
-    double angularRate[3] = { pos[i].gx , pos[i].gy , pos[i].gz };
-    double magneticField[3] = { pos[i].mx , pos[i].my , pos[i].mz };
-    double acceleration[3] = { pos[i].ax , pos[i].ay , pos[i].az };
-
-    if (device->AccelerometerTool != NULL)
-    {
-      device->LastAccelerometerToTrackerTransform->Identity();
-      device->LastAccelerometerToTrackerTransform->SetElement(0, 3, acceleration[0]);
-      device->LastAccelerometerToTrackerTransform->SetElement(1, 3, acceleration[1]);
-      device->LastAccelerometerToTrackerTransform->SetElement(2, 3, acceleration[2]);
-      device->ToolTimeStampedUpdateWithoutFiltering(device->AccelerometerTool->GetId(), device->LastAccelerometerToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-    }
-    if (device->GyroscopeTool != NULL)
-    {
-      device->LastGyroscopeToTrackerTransform->Identity();
-      device->LastGyroscopeToTrackerTransform->SetElement(0, 3, angularRate[0]);
-      device->LastGyroscopeToTrackerTransform->SetElement(1, 3, angularRate[1]);
-      device->LastGyroscopeToTrackerTransform->SetElement(2, 3, angularRate[2]);
-      device->ToolTimeStampedUpdateWithoutFiltering(device->GyroscopeTool->GetId(), device->LastGyroscopeToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-    }
-    if (device->MagnetometerTool != NULL)
-    {
-      if (magneticField[0] > 1e100)
-      {
-        // magnetometer data is not available, use the last transform with an invalid status to not have any missing transform
-        device->ToolTimeStampedUpdateWithoutFiltering(device->MagnetometerTool->GetId(), device->LastMagnetometerToTrackerTransform, TOOL_INVALID, converted_timestamp, converted_timestamp);
-      }
-      else
-      {
-        // magnetometer data is valid
-        device->LastMagnetometerToTrackerTransform->Identity();
-        device->LastMagnetometerToTrackerTransform->SetElement(0, 3, magneticField[0]);
-        device->LastMagnetometerToTrackerTransform->SetElement(1, 3, magneticField[1]);
-        device->LastMagnetometerToTrackerTransform->SetElement(2, 3, magneticField[2]);
-        device->ToolTimeStampedUpdateWithoutFiltering(device->MagnetometerTool->GetId(), device->LastMagnetometerToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-      }
-    }
-
-    if (device->TiltSensorTool != NULL)
-    {
-      // Compose matrix that transforms the x axis to the input vector by rotations around two orthogonal axes
-      vtkSmartPointer<vtkTransform> transform = vtkSmartPointer<vtkTransform>::New();
-
-      double downVector_Sensor[4] = { acceleration[0], acceleration[1], acceleration[2], 0 }; // provided by the sensor
-      vtkMath::Normalize(downVector_Sensor);
-
-      igsioMath::ConstrainRotationToTwoAxes(downVector_Sensor, device->TiltSensorWestAxisIndex, device->LastTiltSensorToTrackerTransform);
-
-      device->ToolTimeStampedUpdateWithoutFiltering(device->TiltSensorTool->GetId(), device->LastTiltSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-    }
-
-    if (device->OrientationSensorTool != NULL)
-    {
-      if (magneticField[0] > 1e100)
-      {
-        // magnetometer data is not available, use the last transform with an invalid status to not have any missing transform
-        device->ToolTimeStampedUpdateWithoutFiltering(device->OrientationSensorTool->GetId(), device->LastOrientationSensorToTrackerTransform, TOOL_INVALID, converted_timestamp, converted_timestamp);
-      }
-      else
-      {
-        // magnetometer data is valid
-
-        //LOG_TRACE("samplingTime(msec)="<<1000.0*timeSinceLastAhrsUpdateSec<<", packetCount="<<count);
-        //LOG_TRACE("gyroX="<<std::fixed<<std::setprecision(2)<<std::setw(6)<<angularRate[0]<<", gyroY="<<angularRate[1]<<", gyroZ="<<angularRate[2]);
-        //LOG_TRACE("magX="<<std::fixed<<std::setprecision(2)<<std::setw(6)<<magneticField[0]<<", magY="<<magneticField[1]<<", magZ="<<magneticField[2]);
-
-        if (device->AhrsUseMagnetometer)
-        {
-          device->AhrsAlgo->UpdateWithTimestamp(
-            vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
-            acceleration[0], acceleration[1], acceleration[2],
-            magneticField[0], magneticField[1], magneticField[2], converted_timestamp);
-        }
-        else
-        {
-          device->AhrsAlgo->UpdateIMUWithTimestamp(
-            vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
-            acceleration[0], acceleration[1], acceleration[2], converted_timestamp);
-        }
-
-
-        double rotQuat[4] = { 0 };
-        device->AhrsAlgo->GetOrientation(rotQuat[0], rotQuat[1], rotQuat[2], rotQuat[3]);
-
-        double rotMatrix[3][3] = { 0 };
-        vtkMath::QuaternionToMatrix3x3(rotQuat, rotMatrix);
-
-        for (int c = 0; c < 3; c++)
-        {
-          for (int r = 0; r < 3; r++)
-          {
-            device->LastOrientationSensorToTrackerTransform->SetElement(r, c, rotMatrix[r][c]);
-          }
-        }
-
-        device->ToolTimeStampedUpdateWithoutFiltering(device->OrientationSensorTool->GetId(), device->LastOrientationSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-      }
-    }
-    if (device->FilteredTiltSensorTool != NULL)
-    {
-      device->FilteredTiltSensorAhrsAlgo->UpdateIMUWithTimestamp(
-        vtkMath::RadiansFromDegrees(angularRate[0]), vtkMath::RadiansFromDegrees(angularRate[1]), vtkMath::RadiansFromDegrees(angularRate[2]),
-        acceleration[0], acceleration[1], acceleration[2], converted_timestamp);
-
-      double rotQuat[4] = { 0 };
-      device->AhrsAlgo->GetOrientation(rotQuat[0], rotQuat[1], rotQuat[2], rotQuat[3]);
-
-      double rotMatrix[3][3] = { 0 };
-      vtkMath::QuaternionToMatrix3x3(rotQuat, rotMatrix);
-
-      double filteredDownVector_Sensor[4] = { rotMatrix[2][0], rotMatrix[2][1], rotMatrix[2][2], 0 };
-      vtkMath::Normalize(filteredDownVector_Sensor);
-
-      igsioMath::ConstrainRotationToTwoAxes(filteredDownVector_Sensor, device->FilteredTiltSensorWestAxisIndex, device->LastFilteredTiltSensorToTrackerTransform);
-
-      device->ToolTimeStampedUpdateWithoutFiltering(device->FilteredTiltSensorTool->GetId(), device->LastFilteredTiltSensorToTrackerTransform, TOOL_OK, converted_timestamp, converted_timestamp);
-
-      // write back the results to the FilteredTiltSensor_AHRS algorithm
-      for (int c = 0; c < 3; c++)
-      {
-        for (int r = 0; r < 3; r++)
-        {
-          rotMatrix[r][c] = device->LastFilteredTiltSensorToTrackerTransform->GetElement(r, c);
-        }
-      }
-      double filteredTiltSensorRotQuat[4] = { 0 };
-      vtkMath::Matrix3x3ToQuaternion(rotMatrix, filteredTiltSensorRotQuat);
-      device->FilteredTiltSensorAhrsAlgo->SetOrientation(filteredTiltSensorRotQuat[0], filteredTiltSensorRotQuat[1], filteredTiltSensorRotQuat[2], filteredTiltSensorRotQuat[3]);
-    }
-  }
-
-  device->FrameNumber++;
-}
-
-//----------------------------------------------------------------------------
-void vtkPlusClariusOEM::RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
-{
-  LOG_TRACE("vtkPlusClariusOEM::RawImageCallback");
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device == NULL)
-  {
-    LOG_ERROR("Clarius instance is NULL");
-    return;
-  }
-
-  LOG_TRACE("New raw image (" << newImage << "): " << nfo->lines << " lines using " << nfo->samples << " samples, @ " << nfo->bitsPerSample << " bits."
-    << nfo->axialSize << " axial microns per sample, " << nfo->lateralSize << " lateral microns per line.");
-
-  // Check if still connected
-  if (device->Connected == 0)
-  {
-    LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->IpAddress
-      << " port = " << device->TcpPort);
-    return;
-  }
-
-  if (newImage == NULL)
-  {
-    LOG_ERROR("No frame received by the device");
-    return;
-  }
-
-  vtkPlusDataSource* rfModeSource = nullptr;
-  std::vector<vtkPlusDataSource*> rfModeSources;
-  device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
-  if (!rfModeSources.empty())
-  {
-    rfModeSource = rfModeSources[0];
-  }
-  else
-  {
-    LOG_WARNING("Raw image was received, however no output RF video source was found.");
-    return;
-  }
-
-  // Set Image Properties
-  int pixelType = VTK_UNSIGNED_CHAR;
-  int frameBufferBytesPerSample = (nfo->bitsPerSample / 8);
-  switch (frameBufferBytesPerSample)
-  {
-  case VTK_SIZEOF_LONG_LONG:
-    pixelType = VTK_LONG_LONG;
-    break;
-  case VTK_SIZEOF_INT:
-    pixelType = VTK_UNSIGNED_INT;
-    break;
-  case VTK_SIZEOF_SHORT:
-    pixelType = VTK_UNSIGNED_SHORT;
-    break;
-  case VTK_SIZEOF_CHAR:
-  default:
-    pixelType = VTK_UNSIGNED_CHAR;
-    break;
-  }
-  rfModeSource->SetInputFrameSize(nfo->lines, nfo->samples, 1);
-  rfModeSource->SetPixelType(pixelType);
-  rfModeSource->SetImageType(US_IMG_RF_REAL);
-  rfModeSource->SetOutputImageOrientation(US_IMG_ORIENT_MF);
-
-  int frameSizeInBytes = nfo->lines * nfo->samples * frameBufferBytesPerSample;
-
-  // the clarius timestamp is in nanoseconds
-  device->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
-  // Get system time (elapsed time since last reboot), return Internal system time in seconds
-  double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
-  if (device->FrameNumber == 0)
-  {
-    device->SystemStartTimestamp = systemTime;
-    device->ClariusStartTimestamp = device->ClariusLastTimestamp;
-  }
-
-  // Need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
-  std::vector<char> imageData;
-  if (imageData.size() < static_cast<size_t>(frameSizeInBytes))
-  {
-    imageData.resize(static_cast<size_t>(frameSizeInBytes));
-  }
-  memcpy(imageData.data(), newImage, static_cast<size_t>(frameSizeInBytes));
-
-  double convertedTimestamp = device->SystemStartTimestamp + (device->ClariusLastTimestamp - device->ClariusStartTimestamp);
-  rfModeSource->AddItem(
-    (void*)newImage, // pointer to char array
-    rfModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-                                              // Set to UN to keep the orientation of the image the same as on tablet
-    rfModeSource->GetInputFrameSize(),
-    pixelType,
-    1,
-    US_IMG_RF_REAL,
-    0,
-    device->FrameNumber,
-    convertedTimestamp,
-    convertedTimestamp);
-}
 
 //----------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime)
