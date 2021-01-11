@@ -35,11 +35,14 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
 
-#define BLOCKINGCALL    nullptr
-#define DEFAULT_FRAME_WIDTH 640
-#define DEFAULT_FRAME_HEIGHT 480
-#define BUFFER_SIZE 200
-#define DEFAULT_PATH_TO_SEC_KEY "/tmp/"
+namespace
+{
+  static const void* BLOCKINGCALL = nullptr;
+  static const int DEFAULT_FRAME_WIDTH = 640;
+  static const int DEFAULT_FRAME_HEIGHT = 480;
+  static const int BUFFER_SIZE = 200;
+  static const std::string DEFAULT_PATH_TO_SEC_KEY = "/tmp/";
+}
 
 //----------------------------------------------------------------------------
 
