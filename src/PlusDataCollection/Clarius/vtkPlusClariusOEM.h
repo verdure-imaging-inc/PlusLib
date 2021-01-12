@@ -1,6 +1,7 @@
 /*=Plus=header=begin======================================================
-    Program: Plus
-    Copyright (c) UBC Biomedical Signal and Image Computing Laboratory. All rights reserved.
+Program: Plus
+Copyright (c) Laboratory for Percutaneous Surgery. All rights reserved.
+See License.txt for details.
 =========================================================Plus=header=end*/
 
 #ifndef _VTKPLUSCLARIUSOEM_H
@@ -12,10 +13,9 @@
 
 /*!
 \class vtkPlusClariusOEM
-\brief Interface to the Clarius OEM API
-This class talks with a Clarius Scanner over the Clarius OEM API.
-Note: A license may be required from Clarius to access this API.
-Requires PLUS_USE_CLARIUS_OEM option in CMake.
+\brief Interface to Clarius Ultrasound Devices
+This class talks with a Clarius US Scanner over the Clarius OEM API.
+Requires the PLUS_USE_CLARIUS_OEM option in CMake.
  \ingroup PlusLibDataCollection
 */
 class vtkPlusDataCollectionExport vtkPlusClariusOEM : public vtkPlusUsDevice
@@ -37,6 +37,17 @@ public:
 
   bool IsVirtual() const override { return false; };
 
+private:
+
+  // configuration helper methods
+
+  PlusStatus ParseConnectionConfig(vtkXMLDataElement* deviceConfig);
+
+  PlusStatus ParseGainConfig(vtkXMLDataElement* deviceConfig);
+
+  PlusStatus ParseImuConfig(vtkXMLDataElement* deviceConfig);
+
+public:
   /*! Read configuration from xml data */
   PlusStatus ReadConfiguration(vtkXMLDataElement* config) override;
 
@@ -70,6 +81,7 @@ protected:
 
   class vtkInternal;
   vtkInternal* Internal;
+
 };
 
 #endif
