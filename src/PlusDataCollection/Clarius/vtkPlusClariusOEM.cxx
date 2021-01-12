@@ -295,7 +295,6 @@ void vtkPlusClariusOEM::vtkInternal::SwUpdateFn(int ret)
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
-  LOG_TRACE("vtkPlusClariusOEM::RawImageCallback");
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
   {
@@ -395,7 +394,6 @@ void vtkPlusClariusOEM::vtkInternal::RawImageCallback(const void* newImage, cons
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
-  LOG_TRACE("vtkPlusClariusOEM::ProcessedImageCallback");
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
   {
@@ -668,7 +666,6 @@ void vtkPlusClariusOEM::vtkInternal::ErrorFn(const char* err)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::vtkInternal::WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime)
 {
-  LOG_TRACE("vtkPlusClariusOEM::WritePosesToCsv");
   if (npos != 0)
   {
     LOG_TRACE("timestamp in nanoseconds ClariusPosInfo" << pos[0].tm);
@@ -733,8 +730,6 @@ PlusStatus vtkPlusClariusOEM::vtkInternal::WritePosesToCsv(const ClariusProcesse
 
 
 
-
-
 //-------------------------------------------------------------------------------------------------
 // vtkPlusClariusOEM definitions
 //-------------------------------------------------------------------------------------------------
@@ -751,7 +746,6 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::New()
 vtkPlusClariusOEM::vtkPlusClariusOEM()
   : Internal(new vtkInternal(this))
 {
-  LOG_TRACE("vtkPlusClariusOEM: Constructor");
   this->StartThreadForInternalUpdates = false;
   this->ImagingParameters->SetImageSize(DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT, 1);
 
@@ -786,7 +780,6 @@ vtkPlusClariusOEM::~vtkPlusClariusOEM()
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM* vtkPlusClariusOEM::GetInstance()
 {
-  LOG_TRACE("vtkPlusClariusOEM: GetInstance()");
   if (instance != NULL)
   {
     return instance;
@@ -803,6 +796,8 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::GetInstance()
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
 {
+  LOG_TRACE("vtkPlusClariusOEM::PrintSelf");
+
   this->Superclass::PrintSelf(os, indent);
   os << indent << "ipAddress" << this->Internal->IpAddress << std::endl;
   os << indent << "tcpPort" << this->Internal->TcpPort << std::endl;
@@ -816,6 +811,8 @@ void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
 
 PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceConfig)
 {
+  LOG_TRACE("vtkPlusClariusOEM::ParseConnectionConfig");
+
   XML_READ_ENUM2_ATTRIBUTE_NONMEMBER_REQUIRED(
     ConnectionType, this->Internal->ConnectionType, deviceConfig,
     "DIRECT", CONNECTION_TYPE::DIRECT,
@@ -847,6 +844,8 @@ PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceCon
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::ParseGainConfig(vtkXMLDataElement* deviceConfig)
 {
+  LOG_TRACE("vtkPlusClariusOEM::ParseGainConfig");
+
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
     AutoGainEnabled, this->Internal->AutoGainEnabled, deviceConfig);
 
@@ -868,6 +867,8 @@ PlusStatus vtkPlusClariusOEM::ParseGainConfig(vtkXMLDataElement* deviceConfig)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::ParseImuConfig(vtkXMLDataElement* deviceConfig)
 {
+  LOG_TRACE("vtkPlusClariusOEM::ParseImuConfig");
+
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
     ImuEnabled, this->Internal->ImuEnabled, deviceConfig);
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
@@ -996,6 +997,7 @@ PlusStatus vtkPlusClariusOEM::ParseImuConfig(vtkXMLDataElement* deviceConfig)
 PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigElement)
 {
   LOG_TRACE("vtkPlusClariusOEM::ReadConfiguration");
+
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
   // parse probe type & serial number
@@ -1037,6 +1039,7 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
 PlusStatus vtkPlusClariusOEM::WriteConfiguration(vtkXMLDataElement* rootConfigElement)
 {
   LOG_TRACE("vtkPlusClariusOEM::WriteConfiguration");
+
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_WRITING(deviceConfig, rootConfigElement);
 
   deviceConfig->SetAttribute("IpAddress", this->Internal->IpAddress.c_str());
@@ -1103,8 +1106,10 @@ PlusStatus vtkPlusClariusOEM::Probe()
 };
 
 //-------------------------------------------------------------------------------------------------
-std::string vtkPlusClariusOEM::vtkPlusClariusOEM::GetSdkVersion()
+std::string vtkPlusClariusOEM::GetSdkVersion()
 {
+  LOG_TRACE("vtkPlusClariusOEM::GetSdkVersion");
+
   std::ostringstream version;
   version << "Sdk version not available" << "\n";
   return version.str();
@@ -1113,7 +1118,7 @@ std::string vtkPlusClariusOEM::vtkPlusClariusOEM::GetSdkVersion()
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalConnect()
 {
-  LOG_DEBUG("vtkPlusClariusOEM: InternalConnect");
+  LOG_TRACE("vtkPlusClariusOEM::InternalConnect");
 
   if (this->Internal->ImuEnabled)
   {
@@ -1282,19 +1287,24 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalStartRecording()
 {
+  LOG_TRACE("vtkPlusClariusOEM::InternalStartRecording");
+
   return PLUS_FAIL;
 }
 
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalStopRecording()
 {
+  LOG_TRACE("vtkPlusClariusOEM::InternalStopRecording");
+
   return PLUS_FAIL;
 }
 
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalDisconnect()
 {
-  LOG_DEBUG("vtkPlusClariusOEM: InternalDisconnect");
+  LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
+
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device->GetConnected())
   {
