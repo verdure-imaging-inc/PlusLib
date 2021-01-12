@@ -31,6 +31,10 @@ See License.txt for details.
 #include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
 
+// STL includes
+#include <map>
+#include <string>
+
 // vtkxio includes
 #include "MadgwickAhrsAlgo.h"
 #include "MahonyAhrsAlgo.h"
@@ -53,6 +57,15 @@ namespace
     DIRECT = 0,
     ACCESS_POINT
   };
+
+  static std::map<int, std::string> ConnectEnumToString{
+    {0,  "CONNECT_SUCCESS"},
+    {1,  "CONNECT_DISCONNECT"},
+    {2,  "CONNECT_FAILED"},
+    {3,  "CONNECT_SWUPDATE"},
+    {-1, "CONNECT_ERROR"},
+  };
+
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -89,9 +102,9 @@ protected:
 
   static void SwUpdateFn(int ret);
 
-  static void RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+  static void RawImageFn(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos);
 
-  static void ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
+  static void ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
 
   static void ImagingFn(int ready, int imaging);
 
@@ -112,6 +125,8 @@ protected:
   std::string ProbeType;
   //
   std::string ProbeSerialNumber;
+  // path to security key, required by the clarius api
+  std::string PathToSecKey;
 
   // 
   CONNECTION_TYPE ConnectionType;
@@ -144,7 +159,7 @@ protected:
 
 
 
-  std::string PathToSecKey; // path to security key, required by the clarius api
+  
   std::ofstream RawImuDataStream;
   double SystemStartTimestamp;
   double ClariusStartTimestamp;
@@ -293,7 +308,7 @@ void vtkPlusClariusOEM::vtkInternal::SwUpdateFn(int ret)
 }
 
 //-------------------------------------------------------------------------------------------------
-void vtkPlusClariusOEM::vtkInternal::RawImageCallback(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+void vtkPlusClariusOEM::vtkInternal::RawImageFn(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
@@ -392,7 +407,7 @@ void vtkPlusClariusOEM::vtkInternal::RawImageCallback(const void* newImage, cons
 }
 
 //-------------------------------------------------------------------------------------------------
-void vtkPlusClariusOEM::vtkInternal::ProcessedImageCallback(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
+void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
@@ -826,6 +841,13 @@ PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceCon
       IpAddress, this->Internal->IpAddress, deviceConfig);
     XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_REQUIRED(
       int, TcpPort, this->Internal->TcpPort, deviceConfig);
+    
+    if (this->Internal->TcpPort < 0 || this->Internal->TcpPort > 65535)
+    {
+      LOG_ERROR("Invalid TcpPort number provided: " << this->Internal->TcpPort);
+      return PLUS_FAIL;
+    }
+
     // TODO: Add warning if WifiSSID/WifiPassword provided instead
   }
   else
@@ -835,6 +857,7 @@ PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceCon
       WifiSSID, this->Internal->WifiSSID, deviceConfig);
     XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
       WifiPassword, this->Internal->WifiPassword, deviceConfig);
+
     // TODO: Add warning if IpAddress/TcpPort provided instead
   }
 
@@ -1000,11 +1023,13 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
-  // parse probe type & serial number
+  // parse probe type, serial number & path to security key directory
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     ProbeType, this->Internal->ProbeType, deviceConfig);
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     ProbeSerialNumber, this->Internal->ProbeSerialNumber, deviceConfig);
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
+    PathToSecKey, this->Internal->PathToSecKey, deviceConfig);
   
   // parse connection information
   if (ParseConnectionConfig(deviceConfig) != PLUS_SUCCESS)
@@ -1116,171 +1141,185 @@ std::string vtkPlusClariusOEM::GetSdkVersion()
 }
 
 //-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
+{
+  // placeholder argc / argv arguments
+  int argc = 1;
+  char** argv = new char* [1];
+  argv[0] = new char[4];
+  strcpy(argv[0], "abc");
+  const char* path = device->Internal->PathToSecKey.c_str();
+
+  // api callback functions
+  ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
+  ClariusConnectFn connectFnPtr = static_cast<ClariusConnectFn>(&vtkPlusClariusOEM::vtkInternal::ConnectFn);
+  ClariusCertFn certFnPtr = static_cast<ClariusCertFn>(&vtkPlusClariusOEM::vtkInternal::CertFn);
+  ClariusPowerDownFn powerDownFnPtr = static_cast<ClariusPowerDownFn>(&vtkPlusClariusOEM::vtkInternal::PowerDownFn);
+  ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::vtkInternal::SwUpdateFn);
+  ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::vtkInternal::RawImageFn);
+  ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::vtkInternal::ProcessedImageFn);
+  ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::vtkInternal::ImagingFn);
+  ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::vtkInternal::ButtonFn);
+  ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::vtkInternal::ProgressFn);
+  ClariusErrorFn errorFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::vtkInternal::ErrorFn);
+
+  // no b-mode data sources, disable b mode callback
+  std::vector<vtkPlusDataSource*> bModeSources;
+  device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
+  if (bModeSources.empty())
+  {
+    newProcessedImageFnPtr = nullptr;
+  }
+
+  // no RF-mode data sources, disable RF-mode callback
+  std::vector<vtkPlusDataSource*> rfModeSources;
+  device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
+  if (rfModeSources.empty())
+  {
+    newRawImageFnPtr = nullptr;
+  }
+
+  try
+  {
+    FrameSizeType fs = this->ImagingParameters->GetImageSize();
+
+    int result = cusOemInit(
+      argc,
+      argv,
+      path,
+      connectFnPtr,
+      certFnPtr,
+      powerDownFnPtr,
+      newProcessedImageFnPtr,
+      newRawImageFnPtr,
+      imagingFnPtr,
+      buttonFnPtr,
+      errorFnPtr,
+      fs[0],
+      fs[1]
+    );
+
+    if (result != 0)
+    {
+      LOG_ERROR("Failed to initialize Clarius OEM library")
+      return PLUS_FAIL;
+    }
+  }
+  catch (const std::runtime_error& re)
+  {
+    LOG_ERROR("Runtime error on cusOemInit. Error text: " << re.what());
+    return PLUS_FAIL;
+  }
+  catch (const std::exception& ex)
+  {
+    LOG_ERROR("Exception on cusOemInit. Error text: " << ex.what());
+    return PLUS_FAIL;
+  }
+  catch (...)
+  {
+    LOG_ERROR("Unknown failure occurred on cusOemInit");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
+{
+  const char* ip = device->Internal->IpAddress.c_str();
+  unsigned int port = device->Internal->TcpPort;
+  LOG_DEBUG("Attempting to connect to Clarius ultrasound on " << ip << ":" << port);
+
+  try
+  {
+    int result = cusOemConnect(ip, port);
+    if (result != CONNECT_SUCCESS)
+    {
+      LOG_ERROR("Failed to connect to Clarius probe on " << ip << ":" << port << 
+        ". Return code: " << ConnectEnumToString[result]);
+      return PLUS_FAIL;
+    }
+  }
+  catch (const std::runtime_error& re)
+  {
+    LOG_ERROR("Runtime error on cusOemConnect. Error text: " << re.what());
+    return PLUS_FAIL;
+  }
+  catch (const std::exception& ex)
+  {
+    LOG_ERROR("Exception on cusOemConnect. Error text: " << ex.what());
+    return PLUS_FAIL;
+  }
+  catch (...)
+  {
+    LOG_ERROR("Unknown failure occurred on cusOemConnect");
+    return PLUS_FAIL;
+  }
+
+  LOG_INFO("Connected to Clarius probe on " << ip << ":" << port);
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalConnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalConnect");
 
-  if (this->Internal->ImuEnabled)
-  {
-    this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
-    this->Internal->RawImuDataStream << "FrameNum,SystemTimestamp,ConvertedTimestamp,ImageTimestamp,ImuTimeStamp,ax,ay,az,gx,gy,gz,mx,my,mz,\n";
-
-    this->Internal->RawImuDataStream.close();
-  }
-
-  this->Internal->AccelerometerTool = NULL;
-  this->GetToolByPortName("Accelerometer", this->Internal->AccelerometerTool);
-
-  this->Internal->GyroscopeTool = NULL;
-  this->GetToolByPortName("Gyroscope", this->Internal->GyroscopeTool);
-
-  this->Internal->MagnetometerTool = NULL;
-  this->GetToolByPortName("Magnetometer", this->Internal->MagnetometerTool);
-
-  this->Internal->TiltSensorTool = NULL;
-  this->GetToolByPortName("TiltSensor", this->Internal->TiltSensorTool);
-
-  this->Internal->FilteredTiltSensorTool = NULL;
-  this->GetToolByPortName("FilteredTiltSensor", this->Internal->FilteredTiltSensorTool);
-
-  this->Internal->OrientationSensorTool = NULL;
-  this->GetToolByPortName("OrientationSensor", this->Internal->OrientationSensorTool);
-
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  // Initialize Clarius Listener Before Connecting
-  if (!device->Connected)
+
+  if (!device->GetConnected())
   {
-    int argc = 1;
-    char** argv = new char* [1];
-    argv[0] = new char[4];
-    strcpy(argv[0], "abc");
-    const char* path = device->Internal->PathToSecKey.c_str();
-
-    // Callbacks
-    ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
-    ClariusConnectFn connectFnPtr = static_cast<ClariusConnectFn>(&vtkPlusClariusOEM::vtkInternal::ConnectFn);
-    ClariusCertFn certFnPtr = static_cast<ClariusCertFn>(&vtkPlusClariusOEM::vtkInternal::CertFn);
-    ClariusPowerDownFn powerDownFnPtr = static_cast<ClariusPowerDownFn>(&vtkPlusClariusOEM::vtkInternal::PowerDownFn);
-    ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::vtkInternal::SwUpdateFn);
-    ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::vtkInternal::RawImageCallback);
-    ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::vtkInternal::ProcessedImageCallback);
-    ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::vtkInternal::ImagingFn);
-    ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::vtkInternal::ButtonFn);
-    ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::vtkInternal::ProgressFn);
-    ClariusErrorFn errorFnPtr = static_cast<ClariusErrorFn>(&vtkPlusClariusOEM::vtkInternal::ErrorFn);
-
-    // No B-mode data sources. Disable B mode callback.
-    std::vector<vtkPlusDataSource*> bModeSources;
-    device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
-    if (bModeSources.empty())
+    // initialize Clarius OEM library
+    if (InitializeClarius(device) != PLUS_SUCCESS)
     {
-      newProcessedImageFnPtr = nullptr;
-    }
-
-    // No RF-mode data sources. Disable RF mode callback.
-    std::vector<vtkPlusDataSource*> rfModeSources;
-    device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
-    if (rfModeSources.empty())
-    {
-      newRawImageFnPtr = nullptr;
-    }
-
-    try
-    {
-      FrameSizeType fs = this->ImagingParameters->GetImageSize();
-
-      int init_res = cusOemInit(
-        argc,
-        argv,
-        path,
-        connectFnPtr,
-        certFnPtr,
-        powerDownFnPtr,
-        newProcessedImageFnPtr,
-        newRawImageFnPtr,
-        imagingFnPtr,
-        buttonFnPtr,
-        errorFnPtr,
-        fs[0],
-        fs[1]
-      );
-
-      if (init_res < 0)
-      {
-        return PLUS_FAIL;
-      }
-    }
-    catch (const std::runtime_error& re)
-    {
-      LOG_ERROR("Runtime error: " << re.what());
-      return PLUS_FAIL;
-    }
-    catch (const std::exception& ex)
-    {
-      LOG_ERROR("Error occurred: " << ex.what());
-      return PLUS_FAIL;
-    }
-    catch (...)
-    {
-      LOG_ERROR("Unknown failure occured");
+      LOG_ERROR("Failed to initalize Clarius.");
       return PLUS_FAIL;
     }
 
-    // Attempt to connect;
-    int isConnected = -1;
-    const char* ip = device->Internal->IpAddress.c_str();
-    try {
-      isConnected = cusOemConnect(ip, device->Internal->TcpPort);
-    }
-    catch (const std::runtime_error& re)
+    // connect to Clarius probe
+    if (ConnectToClarius(device) != PLUS_SUCCESS)
     {
-      LOG_ERROR("Runtime error: " << re.what());
+      LOG_ERROR("Failed to connect to Clarius probe.");
       return PLUS_FAIL;
     }
-    catch (const std::exception& ex)
-    {
-      LOG_ERROR("Error occurred: " << ex.what());
-      return PLUS_FAIL;
-    }
-    catch (...)
-    {
-      LOG_ERROR("Unknown failure occured");
-      return PLUS_FAIL;
-    }
-
-    if (isConnected < 0)
-    {
-      LOG_ERROR("Could not connect to scanner at Ip = " << ip << " port number= " << device->Internal->TcpPort << " isConnected = " << isConnected);
-      return PLUS_FAIL;
-    }
-
-    /*device->UdpPort = clariusGetUdpPort();
-    if (device->UdpPort != -1)
-    {
-      LOG_DEBUG("... Clarius device connected, streaming port: " << clariusGetUdpPort());
-      if (clariusSetOutputSize(device->FrameWidth, device->FrameHeight) < 0)
-      {
-        LOG_DEBUG("Clarius Output size can not be set, falling back to default 640*480");
-        device->FrameWidth = DEFAULT_FRAME_WIDTH;
-        device->FrameHeight = DEFAULT_FRAME_HEIGHT;
-      }
-      return PLUS_SUCCESS;
-    }
-    else
-    {
-      LOG_ERROR("... Clarius device connected but could not get valid udp port");
-      return PLUS_FAIL;
-    }*/
   }
   else
   {
+    LOG_ERROR("Scanner already connected");
     //LOG_DEBUG("Scanner already connected to IP address=" << device->Internal->IpAddress
     //  << " TCP Port Number =" << device->Internal->TcpPort << "Streaming Image at UDP Port=" << device->Internal->UdpPort);
     //device->Connected = 1;
     //return PLUS_SUCCESS;
   }
 
-  return PLUS_FAIL;
+  //if (this->Internal->ImuEnabled)
+  //{
+  //  this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
+  //  this->Internal->RawImuDataStream << "FrameNum,SystemTimestamp,ConvertedTimestamp,ImageTimestamp,ImuTimeStamp,ax,ay,az,gx,gy,gz,mx,my,mz,\n";
+
+  //  this->Internal->RawImuDataStream.close();
+  //}
+
+  //this->Internal->AccelerometerTool = NULL;
+  //this->GetToolByPortName("Accelerometer", this->Internal->AccelerometerTool);
+
+  //this->Internal->GyroscopeTool = NULL;
+  //this->GetToolByPortName("Gyroscope", this->Internal->GyroscopeTool);
+
+  //this->Internal->MagnetometerTool = NULL;
+  //this->GetToolByPortName("Magnetometer", this->Internal->MagnetometerTool);
+
+  //this->Internal->TiltSensorTool = NULL;
+  //this->GetToolByPortName("TiltSensor", this->Internal->TiltSensorTool);
+
+  //this->Internal->FilteredTiltSensorTool = NULL;
+  //this->GetToolByPortName("FilteredTiltSensor", this->Internal->FilteredTiltSensorTool);
+
+  //this->Internal->OrientationSensorTool = NULL;
+  //this->GetToolByPortName("OrientationSensor", this->Internal->OrientationSensorTool);
+
+  return PLUS_SUCCESS;
 };
 
 

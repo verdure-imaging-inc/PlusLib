@@ -69,6 +69,13 @@ protected:
   vtkPlusClariusOEM();
   ~vtkPlusClariusOEM();
 
+private:
+
+  PlusStatus InitializeClarius(vtkPlusClariusOEM* device);
+
+  PlusStatus ConnectToClarius(vtkPlusClariusOEM* device);
+
+protected:
   PlusStatus InternalConnect() override;
 
   PlusStatus InternalDisconnect() override;
@@ -81,7 +88,6 @@ protected:
 
   class vtkInternal;
   vtkInternal* Internal;
-
 };
 
 #endif
