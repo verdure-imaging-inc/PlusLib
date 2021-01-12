@@ -10,17 +10,6 @@
 #include "vtkPlusDataCollectionExport.h"
 #include "vtkPlusUsDevice.h"
 
-// Clarius Includes
-#include "oem.h"
-#include "oem_def.h"
-
-// OpenCV includes
-#include <opencv2/imgproc.hpp>
-#include <opencv2/core/mat.hpp>
-#include <opencv2/opencv.hpp>
-
-class AhrsAlgo;
-
 /*!
 \class vtkPlusClariusOEM
 \brief Interface to the Clarius OEM API
@@ -62,7 +51,13 @@ public:
   */
   PlusStatus NotifyConfigured() override;
 
+  /*! return the singleton instance with no reference counting */
+  static vtkPlusClariusOEM* GetInstance();
+
 protected:
+  vtkPlusClariusOEM();
+  ~vtkPlusClariusOEM();
+
   PlusStatus InternalConnect() override;
 
   PlusStatus InternalDisconnect() override;
@@ -71,166 +66,7 @@ protected:
 
   PlusStatus InternalStopRecording() override;
 
-public:
-
-  /*! return the singleton instance with no reference counting */
-  static vtkPlusClariusOEM* GetInstance();
-
-  /*!
-  Request raw ultrasound data in the last N seconds
-  */
-  PlusStatus RequestLastNSecondsRawData(double lastNSeconds);
-
-  /*!
-  Request raw ultrasound data between two timestamps
-  If both timestamps are zero, all available data will be requested
-  */
-  PlusStatus RequestRawData(long long startTimestampNanoSeconds, long long endTimestampNanoSeconds);
-
-  vtkSetMacro(FrameHeight, unsigned int);
-  vtkGetMacro(FrameHeight, unsigned int);
-
-  vtkSetMacro(FrameWidth, unsigned int);
-  vtkGetMacro(FrameWidth, unsigned int);
-
-  vtkSetMacro(IpAddress, std::string);
-  vtkGetMacro(IpAddress, std::string);
-
-  vtkSetMacro(TcpPort, unsigned int);
-  vtkGetMacro(TcpPort, unsigned int);
-
-  vtkSetMacro(ImuEnabled, bool);
-  vtkGetMacro(ImuEnabled, bool);
-
-  vtkSetMacro(WriteImagesToDisk, bool);
-  vtkGetMacro(WriteImagesToDisk, bool);
-
-  vtkSetMacro(ImuOutputFileName, std::string);
-  vtkGetMacro(ImuOutputFileName, std::string);
-
-  /*!
-  Compress raw data using gzip if enabled
-  */
-  vtkGetMacro(CompressRawData, bool);
-  vtkSetMacro(CompressRawData, bool);
-  vtkBooleanMacro(CompressRawData, bool);
-
-  /*!
-  Output filename of the raw Clarius data
-  If empty, data will be written to the Plus output directory
-  */
-  vtkSetStdStringMacro(RawDataOutputFilename);
-  vtkGetStdStringMacro(RawDataOutputFilename);
-
-protected:
-  vtkPlusClariusOEM();
-  ~vtkPlusClariusOEM();
-
-
-  PlusStatus WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime);
-
-  /*!
-  Receive previously requested data
-  */
-  PlusStatus ReceiveRawData(int dataSize);
-
-protected:
-  unsigned int TcpPort;
-  int UdpPort;
-  std::string IpAddress;
-  std::string PathToSecKey; // path to security key, required by the clarius api
-  std::ofstream RawImuDataStream;
-  std::string ImuOutputFileName;
-  int FrameWidth;
-  int FrameHeight;
-  int FrameNumber;
-  double SystemStartTimestamp;
-  double ClariusStartTimestamp;
-  double ClariusLastTimestamp;
-  bool ImuEnabled;
-  bool WriteImagesToDisk;
-
-  cv::Mat cvImage;
-
-  bool CompressRawData;
-  bool IsReceivingRawData;
-  int RawDataSize;
-  void* RawDataPointer;
-  std::string RawDataOutputFilename;
-
   static vtkPlusClariusOEM* instance;
-
-
-
-  /*!
-  Callback function for raw data request
-  */
-  static void RawDataRequestFn(int rawDataSize);
-
-  /*!
-  Callback function for raw data read
-  */
-  static void RawDataWriteFn(int rawDataSize);
-
-  /*!
-  Re-allocate memory to store raw ultrasound data
-  */
-  void AllocateRawData(int size);
-
- // TODO: move to PIMPL class
-  vtkPlusDataSource* AccelerometerTool;
-  vtkPlusDataSource* GyroscopeTool;
-  vtkPlusDataSource* MagnetometerTool;
-  vtkPlusDataSource* TiltSensorTool;
-  vtkPlusDataSource* FilteredTiltSensorTool;
-  vtkPlusDataSource* OrientationSensorTool;
-  vtkNew<vtkMatrix4x4> LastAccelerometerToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastGyroscopeToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastMagnetometerToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastTiltSensorToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastFilteredTiltSensorToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastOrientationSensorToTrackerTransform;
-
-  enum AHRS_METHOD
-  {
-    AHRS_MADGWICK,
-    AHRS_MAHONY
-  };
-
-  AhrsAlgo* FilteredTiltSensorAhrsAlgo;
-
-  AhrsAlgo* AhrsAlgo;
-
-  /*!
-    If AhrsUseMagnetometer enabled (a ..._MARG algorithm is chosen) then heading will be estimated using magnetometer data.
-    Otherwise (when a ..._IMU algorithm is chosen) only the gyroscope data will be used for getting the heading information.
-    IMU may be more noisy, but not sensitive to magnetic field distortions.
-  */
-  bool AhrsUseMagnetometer;
-
-  /*!
-    Gain values used by the AHRS algorithm (Mahony: first parameter is proportional, second is integral gain; Madgwick: only the first parameter is used)
-    Higher gain gives higher reliability to accelerometer&magnetometer data.
-  */
-  double AhrsAlgorithmGain[2];
-  double FilteredTiltSensorAhrsAlgorithmGain[2];
-  vtkSetVector2Macro(AhrsAlgorithmGain, double);
-  vtkSetVector2Macro(FilteredTiltSensorAhrsAlgorithmGain, double);
-
-  /*! last AHRS update time (in system time) */
-  double AhrsLastUpdateTime;
-  double FilteredTiltSensorAhrsLastUpdateTime;
-
-  /*!
-    In tilt sensor mode we don't use the magnetometer, so we have to provide a direction reference.
-    The orientation is specified by specifying an axis that will always point to the "West" direction.
-    Recommended values:
-    If sensor axis 0 points down (the sensor plane is about vertical) => TiltSensorDownAxisIndex = 2.
-    If sensor axis 1 points down (the sensor plane is about vertical) => TiltSensorDownAxisIndex = 0.
-    If sensor axis 2 points down (the sensor plane is about horizontal) => TiltSensorDownAxisIndex = 1.
-  */
-  int TiltSensorWestAxisIndex;
-  int FilteredTiltSensorWestAxisIndex;
 
   class vtkInternal;
   vtkInternal* Internal;
