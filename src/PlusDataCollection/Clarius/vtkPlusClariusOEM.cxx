@@ -280,36 +280,37 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ListFn(const char* list, int sz)
 {
-
+  LOG_INFO("ListFn: " << list);
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* status)
 {
-
+  LOG_INFO("ConnectFn: ret=" << ret << " port=" << port << " status=" << status);
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::CertFn(int daysValid)
 {
-
+  LOG_INFO("CertFn: days_valid=" << daysValid);
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::PowerDownFn(int ret, int tm)
 {
-
+  LOG_INFO("PowerDownFn: ret=" << ret << " tm=" << tm);
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::SwUpdateFn(int ret)
 {
-
+  LOG_INFO("SwUpdateFn: ret=" << ret);
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::RawImageFn(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
+  LOG_INFO("RawImageFn");
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
   {
@@ -409,6 +410,8 @@ void vtkPlusClariusOEM::vtkInternal::RawImageFn(const void* newImage, const Clar
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
+  LOG_INFO("ProcessedImageFn");
+
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
   {
@@ -648,7 +651,20 @@ void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, cons
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ImagingFn(int ready, int imaging)
 {
+  LOG_INFO("ImagingFn: ready=" << ready << " imaging: " << imaging);
 
+  if (ready == IMAGING_READY)
+  {
+    LOG_INFO("ready to image: " << ((imaging) ? "imaging running" : "imaging stopped"));
+  }
+  else if (ready == IMAGING_CERTEXPIRED)
+  {
+    LOG_ERROR("certificate needs updating prior to imaging");
+  }
+  else
+  {
+    LOG_ERROR("not ready to image");
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -657,7 +673,7 @@ void vtkPlusClariusOEM::vtkInternal::ImagingFn(int ready, int imaging)
  * @param[in] clicks # of clicks performed*/
 void vtkPlusClariusOEM::vtkInternal::ButtonFn(int btn, int clicks)
 {
-  LOG_DEBUG("button: " << btn << "clicks: " << clicks << "%");
+  LOG_INFO("button: " << btn << "clicks: " << clicks << "%");
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -665,7 +681,7 @@ void vtkPlusClariusOEM::vtkInternal::ButtonFn(int btn, int clicks)
  * @pram[in] progress the readback process*/
 void vtkPlusClariusOEM::vtkInternal::ProgressFn(int progress)
 {
-  LOG_DEBUG("Download: " << progress << "%");
+  LOG_INFO("Download: " << progress << "%");
 }
 
 
@@ -675,7 +691,7 @@ void vtkPlusClariusOEM::vtkInternal::ProgressFn(int progress)
  * */
 void vtkPlusClariusOEM::vtkInternal::ErrorFn(const char* err)
 {
-  LOG_ERROR("error: " << err);
+  LOG_INFO("error: " << err);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1287,12 +1303,27 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   else
   {
     LOG_ERROR("Scanner already connected");
-    //LOG_DEBUG("Scanner already connected to IP address=" << device->Internal->IpAddress
-    //  << " TCP Port Number =" << device->Internal->TcpPort << "Streaming Image at UDP Port=" << device->Internal->UdpPort);
-    //device->Connected = 1;
-    //return PLUS_SUCCESS;
   }
 
+  // delay to connect
+  vtkIGSIOAccurateTimer::Delay(2);
+
+  ClariusStatusInfo stats;
+  if (cusOemStatusInfo(&stats) == 0)
+    LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
+
+
+  // configure probe
+  if (cusOemLoadApplication("C3HD", "msk") == 0)
+  {
+    LOG_INFO("trying to load application: probe=" << "C3HD" << " application=" << "msk");
+  }
+  else
+  {
+    LOG_ERROR("error calling load application");
+  }
+
+  vtkIGSIOAccurateTimer::Delay(2);
   //if (this->Internal->ImuEnabled)
   //{
   //  this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
@@ -1328,7 +1359,13 @@ PlusStatus vtkPlusClariusOEM::InternalStartRecording()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalStartRecording");
 
-  return PLUS_FAIL;
+  if (cusOemRun(1) < 0)
+  {
+    LOG_ERROR("run imaging request failed");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1336,7 +1373,13 @@ PlusStatus vtkPlusClariusOEM::InternalStopRecording()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalStopRecording");
 
-  return PLUS_FAIL;
+  if (cusOemRun(0) < 0)
+  {
+    LOG_ERROR("stop imaging request failed");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
 }
 
 //-------------------------------------------------------------------------------------------------
