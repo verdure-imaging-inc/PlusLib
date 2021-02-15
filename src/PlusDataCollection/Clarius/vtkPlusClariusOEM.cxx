@@ -32,6 +32,7 @@ See License.txt for details.
 #include <opencv2/opencv.hpp>
 
 // STL includes
+#include <chrono>
 #include <map>
 #include <string>
 
@@ -46,11 +47,21 @@ See License.txt for details.
 
 namespace
 {
+  //
   static const void* BLOCKINGCALL = nullptr;
+
+  //
   static const int DEFAULT_FRAME_WIDTH = 640;
   static const int DEFAULT_FRAME_HEIGHT = 480;
+
+  //
   static const int BUFFER_SIZE = 200;
+
+  //
   static const std::string DEFAULT_PATH_TO_SEC_KEY = "/tmp/";
+
+  //
+  static const double CONNECTION_DURATION_MSEC = 10000;
 
   enum class CONNECTION_TYPE
   {
@@ -58,12 +69,12 @@ namespace
     ACCESS_POINT
   };
 
-  static std::map<int, std::string> ConnectEnumToString{
-    {0,  "CONNECT_SUCCESS"},
-    {1,  "CONNECT_DISCONNECT"},
-    {2,  "CONNECT_FAILED"},
-    {3,  "CONNECT_SWUPDATE"},
-    {-1, "CONNECT_ERROR"},
+  static std::map<int, std::string> ConnectEnumToString {
+    {CONNECT_SUCCESS, "CONNECT_SUCCESS"},
+    {CONNECT_DISCONNECT, "CONNECT_DISCONNECT"},
+    {CONNECT_FAILED, "CONNECT_FAILED"},
+    {CONNECT_SWUPDATE, "CONNECT_SWUPDATE"},
+    {CONNECT_ERROR, "CONNECT_ERROR"},
   };
 
 }
@@ -120,6 +131,10 @@ protected:
   // helper methods
 
   // member variables
+
+
+  //
+  bool Connected;
 
   // 
   std::string ProbeType;
@@ -238,6 +253,7 @@ protected:
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 : External(ext)
+, Connected(false)
 , ProbeType("")
 , ProbeSerialNumber("")
 , ConnectionType(CONNECTION_TYPE::DIRECT)
@@ -286,7 +302,12 @@ void vtkPlusClariusOEM::vtkInternal::ListFn(const char* list, int sz)
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* status)
 {
-  LOG_INFO("ConnectFn: ret=" << ret << " port=" << port << " status=" << status);
+  if (ret == CONNECT_SUCCESS)
+  {
+    // connection succeeded, set Internal->Connected variable to end busy wait in InternalConnect
+    vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+    device->Internal->Connected = true;
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -788,7 +809,6 @@ vtkPlusClariusOEM::vtkPlusClariusOEM()
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::~vtkPlusClariusOEM()
 {
-
   if (this->Recording)
   {
     this->StopRecording();
@@ -815,10 +835,9 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::GetInstance()
   {
     return instance;
   }
-
   else
   {
-    LOG_ERROR("Instance is null, creating new instance");
+    // Instance is null, creating new instance
     instance = new vtkPlusClariusOEM();
     return instance;
   }
@@ -839,7 +858,6 @@ void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
 }
 
 //-------------------------------------------------------------------------------------------------
-
 PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceConfig)
 {
   LOG_TRACE("vtkPlusClariusOEM::ParseConnectionConfig");
@@ -1245,14 +1263,14 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
 {
   const char* ip = device->Internal->IpAddress.c_str();
   unsigned int port = device->Internal->TcpPort;
-  LOG_DEBUG("Attempting to connect to Clarius ultrasound on " << ip << ":" << port);
+  LOG_INFO("Attempting to connect to Clarius ultrasound on " << ip << ":" << port << ":");
 
   try
   {
     int result = cusOemConnect(ip, port);
     if (result != CONNECT_SUCCESS)
     {
-      LOG_ERROR("Failed to connect to Clarius probe on " << ip << ":" << port << 
+      LOG_ERROR("Failed to initiate connection to Clarius probe on " << ip << ":" << port << 
         ". Return code: " << ConnectEnumToString[result]);
       return PLUS_FAIL;
     }
@@ -1271,6 +1289,20 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
   {
     LOG_ERROR("Unknown failure occurred on cusOemConnect");
     return PLUS_FAIL;
+  }
+
+  // get start timestamp
+  std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
+
+  while (!Internal->Connected)
+  {
+    std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+    std::chrono::duration<double> dur = t - startTime;
+    if (dur.count() > 10)
+    {
+      LOG_ERROR("Connection to Clarius device timed out.");
+      return PLUS_FAIL;
+    }
   }
 
   LOG_INFO("Connected to Clarius probe on " << ip << ":" << port);
@@ -1353,6 +1385,32 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   return PLUS_SUCCESS;
 };
 
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InternalDisconnect()
+{
+  LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
+
+  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+  if (device->GetConnected())
+  {
+    if (cusOemDisconnect() < 0)
+    {
+      LOG_ERROR("could not disconnect from scanner");
+      return PLUS_FAIL;
+    }
+    else
+    {
+      device->Connected = 0;
+      LOG_DEBUG("Clarius device is now disconnected");
+      return PLUS_SUCCESS;
+    }
+  }
+  else
+  {
+    LOG_DEBUG("...Clarius device already disconnected");
+    return PLUS_SUCCESS;
+  }
+};
 
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalStartRecording()
@@ -1381,30 +1439,3 @@ PlusStatus vtkPlusClariusOEM::InternalStopRecording()
 
   return PLUS_SUCCESS;
 }
-
-//-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::InternalDisconnect()
-{
-  LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
-
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device->GetConnected())
-  {
-    if (cusOemDisconnect() < 0)
-    {
-      LOG_ERROR("could not disconnect from scanner");
-      return PLUS_FAIL;
-    }
-    else
-    {
-      device->Connected = 0;
-      LOG_DEBUG("Clarius device is now disconnected");
-      return PLUS_SUCCESS;
-    }
-  }
-  else
-  {
-    LOG_DEBUG("...Clarius device already disconnected");
-    return PLUS_SUCCESS;
-  }
-};
