@@ -134,7 +134,7 @@ protected:
 
 
   //
-  bool Connected;
+  bool ProbeConnected;
 
   // 
   std::string ProbeType;
@@ -253,7 +253,7 @@ protected:
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 : External(ext)
-, Connected(false)
+, ProbeConnected(false)
 , ProbeType("")
 , ProbeSerialNumber("")
 , ConnectionType(CONNECTION_TYPE::DIRECT)
@@ -306,7 +306,7 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* st
   {
     // connection succeeded, set Internal->Connected variable to end busy wait in InternalConnect
     vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-    device->Internal->Connected = true;
+    device->Internal->ProbeConnected = true;
   }
 }
 
@@ -1263,7 +1263,7 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
 {
   const char* ip = device->Internal->IpAddress.c_str();
   unsigned int port = device->Internal->TcpPort;
-  LOG_INFO("Attempting to connect to Clarius ultrasound on " << ip << ":" << port << ":");
+  LOG_INFO("Attempting connection to Clarius ultrasound on " << ip << ":" << port << " for 10 seconds:");
 
   try
   {
@@ -1294,7 +1294,7 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
   // get start timestamp
   std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
-  while (!Internal->Connected)
+  while (!Internal->ProbeConnected)
   {
     std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
     std::chrono::duration<double> dur = t - startTime;
@@ -1316,11 +1316,12 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
 
-  if (!device->GetConnected())
+  if (!this->Internal->ProbeConnected)
   {
     // initialize Clarius OEM library
     if (InitializeClarius(device) != PLUS_SUCCESS)
     {
+      cusOemDestroy();
       LOG_ERROR("Failed to initalize Clarius.");
       return PLUS_FAIL;
     }
@@ -1328,6 +1329,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     // connect to Clarius probe
     if (ConnectToClarius(device) != PLUS_SUCCESS)
     {
+      cusOemDestroy();
       LOG_ERROR("Failed to connect to Clarius probe.");
       return PLUS_FAIL;
     }
@@ -1336,9 +1338,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   {
     LOG_ERROR("Scanner already connected");
   }
-
-  // delay to connect
-  vtkIGSIOAccurateTimer::Delay(2);
 
   ClariusStatusInfo stats;
   if (cusOemStatusInfo(&stats) == 0)
@@ -1354,8 +1353,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   {
     LOG_ERROR("error calling load application");
   }
-
-  vtkIGSIOAccurateTimer::Delay(2);
   //if (this->Internal->ImuEnabled)
   //{
   //  this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
@@ -1391,7 +1388,7 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device->GetConnected())
+  if (this->Internal->ProbeConnected)
   {
     if (cusOemDisconnect() < 0)
     {
