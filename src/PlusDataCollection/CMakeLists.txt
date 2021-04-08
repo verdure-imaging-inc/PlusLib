@@ -889,6 +889,8 @@ IF(PLUS_USE_CLARIUS_OEM)
 
   FIND_PACKAGE(ClariusOEM REQUIRED)
 
+  FIND_PACKAGE(CBTLib REQUIRED)
+
   SET(CLARIUS_OEM_SRCS
     Clarius/vtkPlusClariusOEM.cxx
     )
@@ -912,12 +914,18 @@ IF(PLUS_USE_CLARIUS_OEM)
 
   LIST(APPEND ${PROJECT_NAME}_PRIVATE_LIBS
     ClariusOEM
+    CBTLib
     )
 
   # copy the ClariusOEM dll to /bin/* directories
+  LIST(APPEND External_Libraries_Debug
+    LOCATION_DEBUG(CBTLib)
+  )
+
   LIST(APPEND External_Libraries_Install
     ${ClariusOEM_BINARY_PATH}
-    )
+    LOCATION_RELEASE(CBTLib)
+  )
 
 ENDIF()
 
