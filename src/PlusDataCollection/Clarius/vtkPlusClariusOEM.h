@@ -73,6 +73,8 @@ private:
 
   PlusStatus InitializeClarius(vtkPlusClariusOEM* device);
 
+  PlusStatus SetClariusCert(vtkPlusClariusOEM* device);
+
   PlusStatus ConnectToClarius(vtkPlusClariusOEM* device);
 
 protected:

@@ -33,7 +33,9 @@ See License.txt for details.
 
 // STL includes
 #include <chrono>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 
 // vtkxio includes
@@ -56,9 +58,6 @@ namespace
 
   //
   static const int BUFFER_SIZE = 200;
-
-  //
-  static const std::string DEFAULT_PATH_TO_SEC_KEY = "/tmp/";
 
   //
   static const double CONNECTION_DURATION_MSEC = 10000;
@@ -117,6 +116,8 @@ protected:
 
   static void ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos);
 
+  static void SpectralImageFn(const void* newImage, const ClariusSpectralImageInfo* nfo);
+
   static void ImagingFn(int ready, int imaging);
 
   static void ButtonFn(int btn, int clicks);
@@ -141,7 +142,7 @@ protected:
   //
   std::string ProbeSerialNumber;
   // path to security key, required by the clarius api
-  std::string PathToSecKey;
+  std::string PathToCert;
 
   // 
   CONNECTION_TYPE ConnectionType;
@@ -268,7 +269,7 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , ImuWriteToFile(false)
 , ImuOutputFileName("")
 
-, PathToSecKey(DEFAULT_PATH_TO_SEC_KEY)
+, PathToCert("")
 , SystemStartTimestamp(0)
 , ClariusStartTimestamp(0)
 , ClariusLastTimestamp(0)
@@ -426,6 +427,12 @@ void vtkPlusClariusOEM::vtkInternal::RawImageFn(const void* newImage, const Clar
     device->FrameNumber,
     convertedTimestamp,
     convertedTimestamp);
+}
+
+//-------------------------------------------------------------------------------------------------
+void vtkPlusClariusOEM::vtkInternal::SpectralImageFn(const void* newImage, const ClariusSpectralImageInfo* nfo)
+{
+  LOG_INFO("SpectralImageFn");
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1063,7 +1070,7 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     ProbeSerialNumber, this->Internal->ProbeSerialNumber, deviceConfig);
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-    PathToSecKey, this->Internal->PathToSecKey, deviceConfig);
+    PathToCert, this->Internal->PathToCert, deviceConfig);
   
   // parse connection information
   if (ParseConnectionConfig(deviceConfig) != PLUS_SUCCESS)
@@ -1182,7 +1189,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
   char** argv = new char* [1];
   argv[0] = new char[4];
   strcpy(argv[0], "abc");
-  const char* path = device->Internal->PathToSecKey.c_str();
+  const char* certPath = "/Clarius";
 
   // api callback functions
   ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
@@ -1192,6 +1199,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
   ClariusSwUpdateFn swUpdateFnPtr = static_cast<ClariusSwUpdateFn>(&vtkPlusClariusOEM::vtkInternal::SwUpdateFn);
   ClariusNewRawImageFn newRawImageFnPtr = static_cast<ClariusNewRawImageFn>(&vtkPlusClariusOEM::vtkInternal::RawImageFn);
   ClariusNewProcessedImageFn newProcessedImageFnPtr = static_cast<ClariusNewProcessedImageFn>(&vtkPlusClariusOEM::vtkInternal::ProcessedImageFn);
+  ClariusNewSpectralImageFn newSpectralImageFnPtr = static_cast<ClariusNewSpectralImageFn>(&vtkPlusClariusOEM::vtkInternal::SpectralImageFn);
   ClariusImagingFn imagingFnPtr = static_cast<ClariusImagingFn>(&vtkPlusClariusOEM::vtkInternal::ImagingFn);
   ClariusButtonFn buttonFnPtr = static_cast<ClariusButtonFn>(&vtkPlusClariusOEM::vtkInternal::ButtonFn);
   ClariusProgressFn progressFnPtr = static_cast<ClariusProgressFn>(&vtkPlusClariusOEM::vtkInternal::ProgressFn);
@@ -1220,12 +1228,13 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
     int result = cusOemInit(
       argc,
       argv,
-      path,
+      certPath,
       connectFnPtr,
       certFnPtr,
       powerDownFnPtr,
       newProcessedImageFnPtr,
       newRawImageFnPtr,
+      newSpectralImageFnPtr,
       imagingFnPtr,
       buttonFnPtr,
       errorFnPtr,
@@ -1236,7 +1245,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
     if (result != 0)
     {
       LOG_ERROR("Failed to initialize Clarius OEM library")
-      return PLUS_FAIL;
+        return PLUS_FAIL;
     }
   }
   catch (const std::runtime_error& re)
@@ -1252,6 +1261,31 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
   catch (...)
   {
     LOG_ERROR("Unknown failure occurred on cusOemInit");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetClariusCert(vtkPlusClariusOEM* device)
+{
+  // load the cert file
+  std::string fullCertPath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(this->Internal->PathToCert);
+  std::ifstream certFile(fullCertPath);
+  if (!certFile.is_open())
+  {
+    LOG_ERROR("Failed to open Clarius cert file from " << fullCertPath << ". Please check the PathToCert path in your config.");
+    return PLUS_FAIL;
+  }
+  std::ostringstream sstr;
+  sstr << certFile.rdbuf();
+  std::string certStr = sstr.str();
+
+  // set cert in OEM API
+  if (cusOemSetCert(certStr.c_str()) != 0)
+  {
+    LOG_ERROR("Failed to set Clarius OEM connection certificate");
     return PLUS_FAIL;
   }
 
@@ -1319,15 +1353,23 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   if (!this->Internal->ProbeConnected)
   {
     // initialize Clarius OEM library
-    if (InitializeClarius(device) != PLUS_SUCCESS)
+    if (this->InitializeClarius(device) != PLUS_SUCCESS)
     {
       cusOemDestroy();
       LOG_ERROR("Failed to initalize Clarius.");
       return PLUS_FAIL;
     }
 
+    // set Clarius certificate
+    if (this->SetClariusCert(device) != PLUS_SUCCESS)
+    {
+      cusOemDestroy();
+      LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to.");
+      return PLUS_FAIL;
+    }
+
     // connect to Clarius probe
-    if (ConnectToClarius(device) != PLUS_SUCCESS)
+    if (this->ConnectToClarius(device) != PLUS_SUCCESS)
     {
       cusOemDestroy();
       LOG_ERROR("Failed to connect to Clarius probe.");
@@ -1338,6 +1380,8 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   {
     LOG_ERROR("Scanner already connected");
   }
+
+  vtkIGSIOAccurateTimer::Delay(1.0);
 
   ClariusStatusInfo stats;
   if (cusOemStatusInfo(&stats) == 0)
@@ -1353,6 +1397,9 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   {
     LOG_ERROR("error calling load application");
   }
+
+  vtkIGSIOAccurateTimer::Delay(1.0);
+
   //if (this->Internal->ImuEnabled)
   //{
   //  this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
