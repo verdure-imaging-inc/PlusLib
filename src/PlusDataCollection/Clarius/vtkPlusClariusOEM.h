@@ -71,6 +71,10 @@ protected:
 
 private:
 
+  PlusStatus PowerOnClarius(vtkPlusClariusOEM* device);
+
+  PlusStatus PowerOffClarius(vtkPlusClariusOEM* device);
+    
   PlusStatus InitializeClarius(vtkPlusClariusOEM* device);
 
   PlusStatus SetClariusCert(vtkPlusClariusOEM* device);

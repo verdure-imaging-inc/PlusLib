@@ -12,6 +12,9 @@ See License.txt for details.
 #include "vtkPlusDataSource.h"
 #include "vtkPlusUsImagingParameters.h"
 
+// Clarius bluetooth helper includes
+#include "CBTInterface.h"
+
 // IGSIO includes
 #include <vtkIGSIOAccurateTimer.h>
 #include <igsioMath.h>
@@ -133,7 +136,9 @@ protected:
 
   // member variables
 
-
+  // Clarius bluetooth library
+  CBTInterface* BluetoothInterface;
+  
   //
   bool ProbeConnected;
 
@@ -254,6 +259,7 @@ protected:
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 : External(ext)
+, BluetoothInterface(nullptr)
 , ProbeConnected(false)
 , ProbeType("")
 , ProbeSerialNumber("")
@@ -438,7 +444,7 @@ void vtkPlusClariusOEM::vtkInternal::SpectralImageFn(const void* newImage, const
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
-  LOG_INFO("ProcessedImageFn");
+  // LOG_INFO("ProcessedImageFn");
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
@@ -878,18 +884,6 @@ PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceCon
   if (this->Internal->ConnectionType == CONNECTION_TYPE::DIRECT)
   {
     // connect directly to probe network using TCP/IP
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-      IpAddress, this->Internal->IpAddress, deviceConfig);
-    XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_REQUIRED(
-      int, TcpPort, this->Internal->TcpPort, deviceConfig);
-    
-    if (this->Internal->TcpPort < 0 || this->Internal->TcpPort > 65535)
-    {
-      LOG_ERROR("Invalid TcpPort number provided: " << this->Internal->TcpPort);
-      return PLUS_FAIL;
-    }
-
-    // TODO: Add warning if WifiSSID/WifiPassword provided instead
   }
   else
   {
@@ -1182,6 +1176,141 @@ std::string vtkPlusClariusOEM::GetSdkVersion()
 }
 
 //-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
+{
+  if (!this->Internal->BluetoothInterface)
+  {
+    this->Internal->BluetoothInterface = new CBTInterface();
+    this->Internal->BluetoothInterface->Initialize();
+  }
+
+  // search for probes
+  std::vector<std::string> probes;
+  if (!this->Internal->BluetoothInterface->SearchForProbes(probes))
+  {
+    LOG_ERROR("An error occurred during SearchForProbes. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (probes.size() == 0)
+  {
+    LOG_ERROR("No Clarius probes found... Please check probe has battery, and is connected to Windows bluetooth");
+    return PLUS_FAIL;
+  }
+
+  // is desired probe available
+  bool isProbeAvailable = false;
+  for (std::string probe : probes)
+  {
+    if (igsioCommon::IsEqualInsensitive(probe, this->Internal->ProbeSerialNumber))
+    {
+      isProbeAvailable = true;
+    }
+  }
+
+  if (!isProbeAvailable)
+  {
+    LOG_ERROR("Desired Clarius probe with SN: " << this->Internal->ProbeSerialNumber << " was not found");
+    return PLUS_FAIL;
+  }
+
+  bool connectionResult;
+  if (!this->Internal->BluetoothInterface->ConnectToProbeBT(this->Internal->ProbeSerialNumber, connectionResult))
+  {
+    LOG_ERROR("An error occurred during ConnectToProbeBT. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!connectionResult)
+  {
+    LOG_ERROR("Failed to connect to Clarius probe");
+    return PLUS_FAIL;
+  }
+
+  // TODO: check the probe is connected
+  bool isConnected;
+  if (!this->Internal->BluetoothInterface->IsProbeConnected(isConnected))
+  {
+    LOG_ERROR("An error occurred during ConnectToProbeBT. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!isConnected)
+  {
+    LOG_ERROR("Somehow checking IsProbeConnected returns FALSE, when probe connection succeeded");
+    return PLUS_FAIL;
+  }
+
+  // power on the probe
+  bool powerState;
+  if (!this->Internal->BluetoothInterface->PowerProbe(true, powerState))
+  {
+    LOG_ERROR("An error occurred during PowerProbe. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!powerState)
+  {
+    LOG_ERROR("Failed to power on Clarius probe");
+    return PLUS_FAIL;
+  }
+
+  // wait for probe to fully power on
+  std::this_thread::sleep_for(std::chrono::seconds(10));
+
+  // configure wifi AP
+  bool configWifiResult;
+  if (!this->Internal->BluetoothInterface->ConfigureWifiAP(configWifiResult))
+  {
+    LOG_ERROR("An error occurred during ConfigureWifiAP. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!configWifiResult)
+  {
+    LOG_ERROR("Failed to configure Clarius probe wifi");
+    return PLUS_FAIL;
+  }
+
+  // wait for wifi info to be applied
+  std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+
+  // get & print wifi info
+  ClariusWifiInfo info;
+  if (!this->Internal->BluetoothInterface->GetWifiInfo(info))
+  {
+    LOG_ERROR("An error occurred during GetWifiInfo. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!info.IsConnected)
+  {
+    LOG_ERROR("Wifi was not connceted when wifi info was requested.");
+  }
+  else
+  {
+    LOG_INFO("Clarius Wifi Info: ");
+    LOG_INFO("Mode: " << (info.IsWifiAP ? "AP" : "LAN"));
+    LOG_INFO("SSID: " << info.SSID);
+    LOG_INFO("Password: " << info.Password);
+    LOG_INFO("IPv4: " << info.IPv4);
+    LOG_INFO("Control Port: " << info.ControlPort);
+    LOG_INFO("Cast Port: " << info.CastPort);
+
+    this->Internal->IpAddress = info.IPv4;
+    this->Internal->TcpPort = info.ControlPort;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
 {
   // placeholder argc / argv arguments
@@ -1352,10 +1481,18 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   if (!this->Internal->ProbeConnected)
   {
+    // power on the probe & get TCP/IP values
+    if (this->PowerOnClarius(device) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to power on Clarius probe");
+      return PLUS_FAIL;
+    }
+    
     // initialize Clarius OEM library
     if (this->InitializeClarius(device) != PLUS_SUCCESS)
     {
       cusOemDestroy();
+      this->PowerOffClarius(device);
       LOG_ERROR("Failed to initalize Clarius.");
       return PLUS_FAIL;
     }
@@ -1363,6 +1500,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     // set Clarius certificate
     if (this->SetClariusCert(device) != PLUS_SUCCESS)
     {
+      this->PowerOffClarius(device);
       cusOemDestroy();
       LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to.");
       return PLUS_FAIL;
@@ -1371,6 +1509,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     // connect to Clarius probe
     if (this->ConnectToClarius(device) != PLUS_SUCCESS)
     {
+      this->PowerOffClarius(device);
       cusOemDestroy();
       LOG_ERROR("Failed to connect to Clarius probe.");
       return PLUS_FAIL;
@@ -1430,6 +1569,62 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 };
 
 //-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::PowerOffClarius(vtkPlusClariusOEM* device)
+{
+  // power off the probe
+  bool powerState;
+  if (!this->Internal->BluetoothInterface->PowerProbe(false, powerState))
+  {
+    LOG_ERROR("An error occurred during PowerProbe. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (powerState)
+  {
+    LOG_ERROR("Failed to power off Clarius probe");
+    return PLUS_FAIL;
+  }
+
+  // disconnect from probe
+  bool disconnectionResult;
+  if (!this->Internal->BluetoothInterface->DisconnectFromProbeBT(disconnectionResult))
+  {
+    LOG_ERROR("An error occurred during DisconnectFromProbeBT. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!disconnectionResult)
+  {
+    LOG_ERROR("Failed to disconnect from Clarius probe");
+    return PLUS_FAIL;
+  }
+
+  // check if disconnected
+  bool isConnected;
+  if (!this->Internal->BluetoothInterface->IsProbeConnected(isConnected))
+  {
+    LOG_ERROR("An error occurred during IsProbeConnected. Error text: "
+      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    return PLUS_FAIL;
+  }
+
+  if (!isConnected)
+  {
+    LOG_ERROR("Somehow checking IsProbeConnected returns FALSE, when probe disconnection succeeded");
+    return PLUS_FAIL;
+  }
+
+  // de-initialize interface
+  this->Internal->BluetoothInterface->DeInitialize();
+  delete this->Internal->BluetoothInterface;
+  this->Internal->BluetoothInterface = nullptr;
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalDisconnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
@@ -1447,6 +1642,12 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
       device->Connected = 0;
       LOG_DEBUG("Clarius device is now disconnected");
       return PLUS_SUCCESS;
+    }
+
+    if (this->PowerOffClarius(device) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to power off Clarius probe");
+      return PLUS_FAIL;
     }
   }
   else
