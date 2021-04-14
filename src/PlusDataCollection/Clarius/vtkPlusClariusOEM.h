@@ -1,7 +1,10 @@
 /*=Plus=header=begin======================================================
-Program: Plus
-Copyright (c) Laboratory for Percutaneous Surgery. All rights reserved.
-See License.txt for details.
+    Program: Plus
+    Copyright (c) Verdure Imaging Inc, Stockton, California. All rights reserved.
+    See License.txt for details.
+
+    We would like to acknowledge Verdure Imaging Inc for generously open-sourcing
+    this support for the Clarius OEM interface to the PLUS & Slicer communities.
 =========================================================Plus=header=end*/
 
 #ifndef _VTKPLUSCLARIUSOEM_H
