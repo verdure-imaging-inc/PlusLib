@@ -1218,19 +1218,37 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
     return PLUS_FAIL;
   }
 
-  bool connectionResult;
-  if (!this->Internal->BluetoothInterface->ConnectToProbeBT(this->Internal->ProbeSerialNumber, connectionResult))
+  bool connectionResult = false;
+  int tries = 0;
+  while (tries < 10)
   {
-    LOG_ERROR("An error occurred during ConnectToProbeBT. Error text: "
-      << this->Internal->BluetoothInterface->GetLastErrorMessage());
+    if (!this->Internal->BluetoothInterface->ConnectToProbeBT(this->Internal->ProbeSerialNumber, connectionResult))
+    {
+      // LOG_ERROR("An error occurred during ConnectToProbeBT. Error text: "
+      //  << this->Internal->BluetoothInterface->GetLastErrorMessage());
+      LOG_WARNING("Failed to connect to Clarius probe on try: " << (tries + 1));
+      tries++;
+      continue;
+    }
+
+    if (!connectionResult)
+    {
+      LOG_WARNING("Failed to connect to Clarius probe on try: " << (tries + 1));
+      tries++;
+    }
+    else
+    {
+      break;
+    }
+  }
+
+  // if still not connected, hard fail
+  if (!connectionResult)
+  {
+    LOG_ERROR("Failed to connect to Clarius probe after 10 tries");
     return PLUS_FAIL;
   }
 
-  if (!connectionResult)
-  {
-    LOG_ERROR("Failed to connect to Clarius probe");
-    return PLUS_FAIL;
-  }
 
   // TODO: check the probe is connected
   bool isConnected;
