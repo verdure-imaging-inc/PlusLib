@@ -15,64 +15,33 @@
 #include "vtkPlusDataSource.h"
 #include "vtkPlusUsImagingParameters.h"
 
-// Clarius bluetooth helper includes
-#include "CBTInterface.h"
-
 // IGSIO includes
 #include <vtkIGSIOAccurateTimer.h>
-#include <igsioMath.h>
 
 // VTK includes
-#include <vtk_zlib.h>
 #include <vtkImageData.h>
-#include <vtkImageImport.h>
 #include <vtkMatrix4x4.h>
-#include <vtkObjectFactory.h>
 #include <vtkSmartPointer.h>
-#include <vtkTransform.h>
-#include <vtkXMLUtilities.h>
-
-// OpenCV includes
-#include <opencv2/imgproc.hpp>
-#include <opencv2/core/mat.hpp>
-#include <opencv2/opencv.hpp>
 
 // STL includes
 #include <chrono>
-#include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
 
-// vtkxio includes
-#include "MadgwickAhrsAlgo.h"
-#include "MahonyAhrsAlgo.h"
+// Clarius bluetooth helper includes
+#include <CBTInterface.h>
 
 // Clarius Includes
-#include "oem.h"
-#include "oem_def.h"
+#include <oem.h>
+#include <oem_def.h>
 
 
 namespace
 {
-  //
-  static const void* BLOCKINGCALL = nullptr;
-
-  //
+  // TODO: convert this to FrameSizeType
   static const int DEFAULT_FRAME_WIDTH = 640;
   static const int DEFAULT_FRAME_HEIGHT = 480;
-
-  //
-  static const int BUFFER_SIZE = 200;
-
-  //
-  static const double CONNECTION_DURATION_MSEC = 10000;
-
-  enum class CONNECTION_TYPE
-  {
-    DIRECT = 0,
-    ACCESS_POINT
-  };
 
   static std::map<int, std::string> ConnectEnumToString {
     {CONNECT_SUCCESS, "CONNECT_SUCCESS"},
@@ -95,7 +64,7 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::instance;
 class vtkPlusClariusOEM::vtkInternal
 {
 public:
-  vtkPlusClariusOEM* External;
+  
 
   vtkInternal(vtkPlusClariusOEM* ext);
 
@@ -132,175 +101,35 @@ protected:
 
   static void ErrorFn(const char* msg);
 
-  //TODO: This should be removed once poses are available over OpenIGTLink
-  PlusStatus WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime);
-
-  // helper methods
-
-  // member variables
-
-  // Clarius bluetooth library
+  // Clarius Qt bluetooth library
   CBTInterface* BluetoothInterface;
   
-  //
-  bool ProbeConnected;
-
-  // 
-  std::string ProbeType;
-  //
+  // user configurable params
   std::string ProbeSerialNum;
-  // path to security key, required by the clarius api
   std::string PathToCert;
 
-  // 
-  CONNECTION_TYPE ConnectionType;
-
-  //
+  // system parameters
   std::string IpAddress;
-  //
-  unsigned int TcpPort;
+  int TcpPort;
 
-  // 
-  std::string WifiSSID;
-  //
-  std::string WifiPassword;
+  // is there currently a probe connected
+  // TODO: rename this OemConnected or OemProbeConnected
+  bool ProbeConnected;
 
-  // 
-  bool AutoGainEnabled;
-  //
-  unsigned int ColorGainPercent;
-  //
-  unsigned int ColorPulseRepFreqKHz;
-
-  //
-  bool ImuEnabled;
-  //
-  bool ImuWriteToFile;
-  //
-  std::string ImuOutputFileName;
-
-
-
-
-
-  
-  std::ofstream RawImuDataStream;
-  double SystemStartTimestamp;
-  double ClariusStartTimestamp;
-  double ClariusLastTimestamp;
-  bool WriteImagesToDisk;
-
-  /*!
-  Compress raw data using gzip if enabled
-  */
-  bool CompressRawData;
-
-  bool IsReceivingRawData;
-  int RawDataSize;
-  void* RawDataPointer;
-
-  /*!
-  Output filename of the raw Clarius data
-  If empty, data will be written to the Plus output directory
-  */
-  std::string RawDataOutputFilename;
-
-  // TODO: should think about whether or not these are all necessary to store
-  vtkPlusDataSource* AccelerometerTool;
-  vtkPlusDataSource* GyroscopeTool;
-  vtkPlusDataSource* MagnetometerTool;
-  vtkPlusDataSource* TiltSensorTool;
-  vtkPlusDataSource* FilteredTiltSensorTool;
-  vtkPlusDataSource* OrientationSensorTool;
-  vtkNew<vtkMatrix4x4> LastAccelerometerToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastGyroscopeToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastMagnetometerToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastTiltSensorToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastFilteredTiltSensorToTrackerTransform;
-  vtkNew<vtkMatrix4x4> LastOrientationSensorToTrackerTransform;
-
-  enum AHRS_METHOD
-  {
-    AHRS_MADGWICK,
-    AHRS_MAHONY
-  };
-
-  AhrsAlgo* FilteredTiltSensorAhrsAlgo;
-
-  AhrsAlgo* AhrsAlgo;
-
-  /*!
-    If AhrsUseMagnetometer enabled (a ..._MARG algorithm is chosen) then heading will be estimated using magnetometer data.
-    Otherwise (when a ..._IMU algorithm is chosen) only the gyroscope data will be used for getting the heading information.
-    IMU may be more noisy, but not sensitive to magnetic field distortions.
-  */
-  bool AhrsUseMagnetometer;
-
-  /*!
-    Gain values used by the AHRS algorithm (Mahony: first parameter is proportional, second is integral gain; Madgwick: only the first parameter is used)
-    Higher gain gives higher reliability to accelerometer&magnetometer data.
-  */
-  double AhrsAlgorithmGain[2];
-  double FilteredTiltSensorAhrsAlgorithmGain[2];
-
-  /*! last AHRS update time (in system time) */
-  double AhrsLastUpdateTime;
-  double FilteredTiltSensorAhrsLastUpdateTime;
-
-  /*!
-    In tilt sensor mode we don't use the magnetometer, so we have to provide a direction reference.
-    The orientation is specified by specifying an axis that will always point to the "West" direction.
-    Recommended values:
-    If sensor axis 0 points down (the sensor plane is about vertical) => TiltSensorDownAxisIndex = 2.
-    If sensor axis 1 points down (the sensor plane is about vertical) => TiltSensorDownAxisIndex = 0.
-    If sensor axis 2 points down (the sensor plane is about horizontal) => TiltSensorDownAxisIndex = 1.
-  */
-  int TiltSensorWestAxisIndex;
-  int FilteredTiltSensorWestAxisIndex;
+private:
+  vtkPlusClariusOEM* External;
 };
 
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 : External(ext)
 , BluetoothInterface(nullptr)
-, ProbeConnected(false)
-, ProbeType("")
 , ProbeSerialNum("")
-, ConnectionType(CONNECTION_TYPE::DIRECT)
-, IpAddress("")
-, TcpPort(0)
-, WifiSSID("")
-, WifiPassword("")
-, AutoGainEnabled(true)
-, ColorGainPercent(0)
-, ColorPulseRepFreqKHz(0)
-, ImuEnabled(false)
-, ImuWriteToFile(false)
-, ImuOutputFileName("")
-
 , PathToCert("")
-, SystemStartTimestamp(0)
-, ClariusStartTimestamp(0)
-, ClariusLastTimestamp(0)
-, WriteImagesToDisk(false)
-, CompressRawData(false)
-, IsReceivingRawData(false)
-, RawDataPointer(nullptr)
+, IpAddress("")
+, TcpPort(-1)
+, ProbeConnected(false)
 {
-  // Set up the AHRS algorithm used by the orientation sensor tool
-  this->AhrsAlgo = new MadgwickAhrsAlgo;
-  this->AhrsUseMagnetometer = true;
-  this->AhrsAlgorithmGain[0] = 1.5; // proportional
-  this->AhrsAlgorithmGain[1] = 0.0; // integral
-  this->AhrsLastUpdateTime = -1;
-
-  // set up the AHRS algorithm used by the FilteredTiltSensor sensor tool
-  this->FilteredTiltSensorAhrsAlgo = new MadgwickAhrsAlgo;
-  this->FilteredTiltSensorAhrsAlgorithmGain[0] = 1.5; // proportional
-  this->FilteredTiltSensorAhrsAlgorithmGain[1] = 0.0; // integral
-  this->FilteredTiltSensorAhrsLastUpdateTime = -1;
-  this->FilteredTiltSensorWestAxisIndex = 1;
-  this->TiltSensorWestAxisIndex = 1; // the sensor plane is horizontal (axis 2 points down, axis 1 points West)
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -342,100 +171,6 @@ void vtkPlusClariusOEM::vtkInternal::SwUpdateFn(int ret)
 void vtkPlusClariusOEM::vtkInternal::RawImageFn(const void* newImage, const ClariusRawImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
   LOG_INFO("RawImageFn");
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device == NULL)
-  {
-    LOG_ERROR("Clarius instance is NULL");
-    return;
-  }
-
-  LOG_TRACE("New raw image (" << newImage << "): " << nfo->lines << " lines using " << nfo->samples << " samples, @ " << nfo->bitsPerSample << " bits."
-    << nfo->axialSize << " axial microns per sample, " << nfo->lateralSize << " lateral microns per line.");
-
-  // Check if still connected
-  if (device->Connected == 0)
-  {
-    LOG_ERROR("Trouble connecting to Clarius Device. IpAddress = " << device->Internal->IpAddress
-      << " port = " << device->Internal->TcpPort);
-    return;
-  }
-
-  if (newImage == NULL)
-  {
-    LOG_ERROR("No frame received by the device");
-    return;
-  }
-
-  vtkPlusDataSource* rfModeSource = nullptr;
-  std::vector<vtkPlusDataSource*> rfModeSources;
-  device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
-  if (!rfModeSources.empty())
-  {
-    rfModeSource = rfModeSources[0];
-  }
-  else
-  {
-    LOG_WARNING("Raw image was received, however no output RF video source was found.");
-    return;
-  }
-
-  // Set Image Properties
-  int pixelType = VTK_UNSIGNED_CHAR;
-  int frameBufferBytesPerSample = (nfo->bitsPerSample / 8);
-  switch (frameBufferBytesPerSample)
-  {
-  case VTK_SIZEOF_LONG_LONG:
-    pixelType = VTK_LONG_LONG;
-    break;
-  case VTK_SIZEOF_INT:
-    pixelType = VTK_UNSIGNED_INT;
-    break;
-  case VTK_SIZEOF_SHORT:
-    pixelType = VTK_UNSIGNED_SHORT;
-    break;
-  case VTK_SIZEOF_CHAR:
-  default:
-    pixelType = VTK_UNSIGNED_CHAR;
-    break;
-  }
-  rfModeSource->SetInputFrameSize(nfo->lines, nfo->samples, 1);
-  rfModeSource->SetPixelType(pixelType);
-  rfModeSource->SetImageType(US_IMG_RF_REAL);
-  rfModeSource->SetOutputImageOrientation(US_IMG_ORIENT_MF);
-
-  int frameSizeInBytes = nfo->lines * nfo->samples * frameBufferBytesPerSample;
-
-  // the clarius timestamp is in nanoseconds
-  device->Internal->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
-  // Get system time (elapsed time since last reboot), return Internal system time in seconds
-  double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
-  if (device->FrameNumber == 0)
-  {
-    device->Internal->SystemStartTimestamp = systemTime;
-    device->Internal->ClariusStartTimestamp = device->Internal->ClariusLastTimestamp;
-  }
-
-  // Need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
-  std::vector<char> imageData;
-  if (imageData.size() < static_cast<size_t>(frameSizeInBytes))
-  {
-    imageData.resize(static_cast<size_t>(frameSizeInBytes));
-  }
-  memcpy(imageData.data(), newImage, static_cast<size_t>(frameSizeInBytes));
-
-  double convertedTimestamp = device->Internal->SystemStartTimestamp + (device->Internal->ClariusLastTimestamp - device->Internal->ClariusStartTimestamp);
-  rfModeSource->AddItem(
-    (void*)newImage, // pointer to char array
-    rfModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-                                              // Set to UN to keep the orientation of the image the same as on tablet
-    rfModeSource->GetInputFrameSize(),
-    pixelType,
-    1,
-    US_IMG_RF_REAL,
-    0,
-    device->FrameNumber,
-    convertedTimestamp,
-    convertedTimestamp);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -506,35 +241,6 @@ void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, cons
     _gray_img.data()
   );
 
-  // the clarius timestamp is in nanoseconds
-  //device->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
-  //// Get system time (elapsed time since last reboot), return Internal system time in seconds
-  //double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
-  //if (device->FrameNumber == 0)
-  //{
-  //  device->SystemStartTimestamp = systemTime;
-  //  device->ClariusStartTimestamp = device->ClariusLastTimestamp;
-  //}
-
-  // The timestamp that each image is tagged with is
-  // (system_start_time + current_clarius_time - clarius_start_time)
- //  double converted_timestamp = device->SystemStartTimestamp + (device->ClariusLastTimestamp - device->ClariusStartTimestamp);
-  //if (npos != 0)
-  //{
-  //  device->WritePosesToCsv(nfo, npos, pos, device->FrameNumber, systemTime, converted_timestamp);
-  //}
-
-  //if (device->WriteImagesToDisk)
-  //{
-  //  // create cvimg to write to disk
-  //  cv::Mat cvimg = cv::Mat(nfo->width, nfo->height, CV_8UC4);
-  //  cvimg.data = cvimg.data = (unsigned char*)_image.data();
-  //  if (cv::imwrite("Clarius_Image" + std::to_string(device->ClariusLastTimestamp) + ".bmp", cvimg) == false)
-  //  {
-  //    LOG_ERROR("ERROR writing clarius image" + std::to_string(device->ClariusLastTimestamp) + " to disk");
-  //  }
-  //}
-
   const double unfilteredTimestamp = vtkIGSIOAccurateTimer::GetSystemTime();
 
   igsioFieldMapType customField;
@@ -553,94 +259,6 @@ void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, cons
     unfilteredTimestamp,
     &customField
   );
-
-  // Set Image Properties
-  //int pixelType = VTK_UNSIGNED_CHAR;
-  //int frameBufferBytesPerPixel = (nfo->bitsPerPixel / 8);
-  //FrameSizeType fs = { nfo->width, nfo->height, 1 };
-  //LOG_INFO("fb bytes per px: " << frameBufferBytesPerPixel);
-  //switch (frameBufferBytesPerPixel)
-  //{
-  //case VTK_SIZEOF_LONG_LONG:
-  //  pixelType = VTK_LONG_LONG;
-  //  break;
-  //case VTK_SIZEOF_INT:
-  //  pixelType = VTK_UNSIGNED_INT;
-  //  break;
-  //case VTK_SIZEOF_SHORT:
-  //  pixelType = VTK_UNSIGNED_SHORT;
-  //  break;
-  //case VTK_SIZEOF_CHAR:
-  //default:
-  //  pixelType = VTK_UNSIGNED_CHAR;
-  //  break;
-  //}
-  //bModeSource->SetInputFrameSize(nfo->width, nfo->height, 1);
-  //bModeSource->SetPixelType(VTK_UNSIGNED_INT);
-  //bModeSource->SetImageType(US_IMG_BRIGHTNESS);
-  //bModeSource->SetInputImageOrientation(US_IMG_ORIENT_MF);
-  //bModeSource->SetInputFrameSize(fs);
-
-  ////int frameSizeInBytes = nfo->width * nfo->height * frameBufferBytesPerPixel;
-  //bModeSource->SetNumberOfScalarComponents(1);
-
-  //// need to copy newImage to new char vector vtkDataSource::AddItem() do not accept const char array
-  //std::vector<int> _image;
-  //size_t img_sz = nfo->width * nfo->height;// *(nfo->bitsPerPixel / 8);
-  //LOG_INFO("img_sz: " << img_sz);
-  //if (_image.size() < img_sz)
-  //{
-  //  _image.resize(img_sz);
-  //}
-  //memcpy(_image.data(), newImage, img_sz);
-
-  //// the clarius timestamp is in nanoseconds
-  //device->Internal->ClariusLastTimestamp = static_cast<double>((double)nfo->tm / (double)1000000000);
-  //// Get system time (elapsed time since last reboot), return Internal system time in seconds
-  //double systemTime = vtkIGSIOAccurateTimer::GetSystemTime();
-  //if (device->FrameNumber == 0)
-  //{
-  //  device->Internal->SystemStartTimestamp = systemTime;
-  //  device->Internal->ClariusStartTimestamp = device->Internal->ClariusLastTimestamp;
-  //}
-
-  //// The timestamp that each image is tagged with is
-  //// (system_start_time + current_clarius_time - clarius_start_time)
-  //double converted_timestamp = device->Internal->SystemStartTimestamp + (device->Internal->ClariusLastTimestamp - device->Internal->ClariusStartTimestamp);
-  //if (npos != 0)
-  //{
-  //  device->Internal->WritePosesToCsv(nfo, npos, pos, device->FrameNumber, systemTime, converted_timestamp);
-  //}
-
-  //if (device->Internal->WriteImagesToDisk)
-  //{
-  //  // create cvimg to write to disk
-  //  cv::Mat cvimg = cv::Mat(nfo->width, nfo->height, CV_8UC4);
-  //  cvimg.data = cvimg.data = (unsigned char*)_image.data();
-  //  if (cv::imwrite("Clarius_Image" + std::to_string(device->Internal->ClariusLastTimestamp) + ".bmp", cvimg) == false)
-  //  {
-  //    LOG_ERROR("ERROR writing clarius image" + std::to_string(device->Internal->ClariusLastTimestamp) + " to disk");
-  //  }
-  //}
-
-  //igsioFieldMapType customField;
-  //customField["micronsPerPixel"] = std::make_pair(igsioFrameFieldFlags::FRAMEFIELD_FORCE_SERVER_SEND, std::to_string(nfo->micronsPerPixel));
-  ////bModeSource->AddItem(
-  ////  (void*)newImage, //_image.data(), // pointer to char array
-  ////  bModeSource->GetInputImageOrientation(), // refer to this url: http://perk-software.cs.queensu.ca/plus/doc/nightly/dev/UltrasoundImageOrientation.html for reference;
-  ////                                       // Set to UN to keep the orientation of the image the same as on tablet
-  ////  bModeSource->GetInputFrameSize(),
-  ////  pixelType,
-  ////  1,
-  ////  US_IMG_BRIGHTNESS,
-  ////  0,
-  ////  device->FrameNumber,
-  ////  converted_timestamp,
-  ////  converted_timestamp,
-  ////  &customField
-  ////);
-
-  //bModeSource->AddItem(_image.data(), bModeSource->GetInputFrameSize(), nfo->imageSize, US_IMG_BRIGHTNESS, device->FrameNumber, converted_timestamp, converted_timestamp, &customField);
 
   device->FrameNumber++;
 }
@@ -690,73 +308,6 @@ void vtkPlusClariusOEM::vtkInternal::ErrorFn(const char* err)
 {
   LOG_INFO("error: " << err);
 }
-
-//-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::vtkInternal::WritePosesToCsv(const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos, int frameNum, double systemTime, double convertedTime)
-{
-  if (npos != 0)
-  {
-    LOG_TRACE("timestamp in nanoseconds ClariusPosInfo" << pos[0].tm);
-    std::string posInfo = "";
-    for (auto i = 0; i < npos; i++)
-    {
-      posInfo += (std::to_string(frameNum) + ",");
-      posInfo += (std::to_string(systemTime) + ",");
-      posInfo += (std::to_string(convertedTime) + ",");
-      posInfo += (std::to_string(nfo->tm) + ",");
-      posInfo += (std::to_string(pos[i].tm) + ",");
-      posInfo += (std::to_string(pos[i].ax) + ",");
-      posInfo += (std::to_string(pos[i].ay) + ",");
-      posInfo += (std::to_string(pos[i].az) + ",");
-      posInfo += (std::to_string(pos[i].gx) + ",");
-      posInfo += (std::to_string(pos[i].gy) + ",");
-      posInfo += (std::to_string(pos[i].gz) + ",");
-      posInfo += (std::to_string(pos[i].mx) + ",");
-      posInfo += (std::to_string(pos[i].my) + ",");
-      posInfo += (std::to_string(pos[i].mz) + ",");
-      posInfo += "\n";
-    }
-
-    // write the string to file
-    this->RawImuDataStream.open(this->ImuOutputFileName, std::ofstream::app);
-    if (this->RawImuDataStream.is_open() == false)
-    {
-      LOG_ERROR("Error opening file for raw imu data");
-      return PLUS_FAIL;
-    }
-
-    this->RawImuDataStream << posInfo;
-    this->RawImuDataStream.close();
-    return PLUS_SUCCESS;
-  }
-
-  return PLUS_SUCCESS;
-}
-
-//-------------------------------------------------------------------------------------------------
-/*! callback for a new image sent from the scanner
- * @param[in] newImage a pointer to the raw image bits of
- * @param[in] nfo the image properties
- * @param[in] npos the # fo positional data points embedded with the frame
- * @param[in] pos the buffer of positional data
- * */
- //void vtkPlusClariusOEM::NewImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
- //{
- //  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
- //    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
- //  if (npos)
- //  {
- //    for (auto i = 0; i < npos; i++)
- //    {
- //      LOG_TRACE("imu: " << i << ", time: " << pos[i].tm);
- //      LOG_TRACE("accel: " << pos[i].ax << "," << pos[i].ay << "," << pos[i].az);
- //      LOG_TRACE("gyro: " << pos[i].gx << "," << pos[i].gy << "," << pos[i].gz);
- //      LOG_TRACE("magnet: " << pos[i].mx << "," << pos[i].my << "," << pos[i].mz);
- //    }
- //  }
- //}
-
-
 
 //-------------------------------------------------------------------------------------------------
 // vtkPlusClariusOEM definitions
@@ -838,26 +389,6 @@ PlusStatus vtkPlusClariusOEM::ParseConnectionConfig(vtkXMLDataElement* deviceCon
 {
   LOG_TRACE("vtkPlusClariusOEM::ParseConnectionConfig");
 
-  XML_READ_ENUM2_ATTRIBUTE_NONMEMBER_REQUIRED(
-    ConnectionType, this->Internal->ConnectionType, deviceConfig,
-    "DIRECT", CONNECTION_TYPE::DIRECT,
-    "ACCESS_POINT", CONNECTION_TYPE::ACCESS_POINT
-  );
-
-  if (this->Internal->ConnectionType == CONNECTION_TYPE::DIRECT)
-  {
-    // connect directly to probe network using TCP/IP
-  }
-  else
-  {
-    // connect to the probe via a local wifi network
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-      WifiSSID, this->Internal->WifiSSID, deviceConfig);
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-      WifiPassword, this->Internal->WifiPassword, deviceConfig);
-
-    // TODO: Add warning if IpAddress/TcpPort provided instead
-  }
 
   return PLUS_SUCCESS;
 }
@@ -867,21 +398,6 @@ PlusStatus vtkPlusClariusOEM::ParseGainConfig(vtkXMLDataElement* deviceConfig)
 {
   LOG_TRACE("vtkPlusClariusOEM::ParseGainConfig");
 
-  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
-    AutoGainEnabled, this->Internal->AutoGainEnabled, deviceConfig);
-
-  if (this->Internal->AutoGainEnabled)
-  {
-    // TODO: Add warnings if gain values specified but autogain enabled
-  }
-  else
-  {
-    XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_REQUIRED(
-      int, ColorGainPercent, this->Internal->ColorGainPercent, deviceConfig);
-    XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_REQUIRED(
-      int, ColorPulseRepFreqKHz, this->Internal->ColorPulseRepFreqKHz, deviceConfig);
-  }
-
   return PLUS_SUCCESS;
 }
 
@@ -889,127 +405,6 @@ PlusStatus vtkPlusClariusOEM::ParseGainConfig(vtkXMLDataElement* deviceConfig)
 PlusStatus vtkPlusClariusOEM::ParseImuConfig(vtkXMLDataElement* deviceConfig)
 {
   LOG_TRACE("vtkPlusClariusOEM::ParseImuConfig");
-
-  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
-    ImuEnabled, this->Internal->ImuEnabled, deviceConfig);
-  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(
-    ImuWriteToFile, this->Internal->ImuWriteToFile, deviceConfig);
-
-  if (this->Internal->ImuEnabled && this->Internal->ImuWriteToFile)
-  {
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-      ImuOutputFileName, this->Internal->ImuOutputFileName, deviceConfig);
-  }
-  else
-  {
-    // TODO: Add warning if unused ImuOutputFileName specified
-  }
-
-  //int tiltSensorWestAxisIndex = 0;
-  //if (deviceConfig->GetScalarAttribute("TiltSensorWestAxisIndex", tiltSensorWestAxisIndex))
-  //{
-  //  if (tiltSensorWestAxisIndex < 0 || tiltSensorWestAxisIndex > 2)
-  //  {
-  //    LOG_ERROR("TiltSensorWestAxisIndex is invalid. Specified value: " << tiltSensorWestAxisIndex << ". Valid values: 0, 1, 2. Keep using the default value: "
-  //      << this->Internal->TiltSensorWestAxisIndex);
-  //  }
-  //  else
-  //  {
-  //    this->Internal->TiltSensorWestAxisIndex = tiltSensorWestAxisIndex;
-  //  }
-  //}
-
-  //int FilteredTiltSensorWestAxisIndex = 0;
-  //if (deviceConfig->GetScalarAttribute("FilteredTiltSensorWestAxisIndex", FilteredTiltSensorWestAxisIndex))
-  //{
-  //  if (FilteredTiltSensorWestAxisIndex < 0 || FilteredTiltSensorWestAxisIndex > 2)
-  //  {
-  //    LOG_ERROR("FilteredTiltSensorWestAxisIndex is invalid. Specified value: " << FilteredTiltSensorWestAxisIndex << ". Valid values: 0, 1, 2. Keep using the default value: "
-  //      << this->Internal->FilteredTiltSensorWestAxisIndex);
-  //  }
-  //  else
-  //  {
-  //    this->Internal->FilteredTiltSensorWestAxisIndex = FilteredTiltSensorWestAxisIndex;
-  //  }
-  //}
-
-  //XML_READ_VECTOR_ATTRIBUTE_NONMEMBER_OPTIONAL(double, 2, AhrsAlgorithmGain, this->Internal->AhrsAlgorithmGain, deviceConfig);
-  //XML_READ_VECTOR_ATTRIBUTE_NONMEMBER_OPTIONAL(double, 2, FilteredTiltSensorAhrsAlgorithmGain, this->Internal->FilteredTiltSensorAhrsAlgorithmGain, deviceConfig);
-
-  //const char* ahrsAlgoName = deviceConfig->GetAttribute("AhrsAlgorithm");
-  //if (ahrsAlgoName != NULL)
-  //{
-  //  if (STRCASECMP("MADGWICK_MARG", ahrsAlgoName) == 0 || STRCASECMP("MADGWICK_IMU", ahrsAlgoName) == 0)
-  //  {
-  //    if (dynamic_cast<MadgwickAhrsAlgo*>(this->Internal->AhrsAlgo) == 0)
-  //    {
-  //      // not the requested type
-  //      // delete the old algo and create a new one with the correct type
-  //      delete this->Internal->AhrsAlgo;
-  //      this->Internal->AhrsAlgo = new MadgwickAhrsAlgo;
-  //    }
-  //    if (STRCASECMP("MADGWICK_MARG", ahrsAlgoName) == 0)
-  //    {
-  //      this->Internal->AhrsUseMagnetometer = true;
-  //    }
-  //    else
-  //    {
-  //      this->Internal->AhrsUseMagnetometer = false;
-  //    }
-  //  }
-  //  else if (STRCASECMP("MAHONY_MARG", ahrsAlgoName) == 0 || STRCASECMP("MAHONY_IMU", ahrsAlgoName) == 0)
-  //  {
-  //    if (dynamic_cast<MahonyAhrsAlgo*>(this->Internal->AhrsAlgo) == 0)
-  //    {
-  //      // not the requested type
-  //      // delete the old algo and create a new one with the correct type
-  //      delete this->Internal->AhrsAlgo;
-  //      this->Internal->AhrsAlgo = new MahonyAhrsAlgo;
-  //    }
-  //    if (STRCASECMP("MAHONY_MARG", ahrsAlgoName) == 0)
-  //    {
-  //      this->Internal->AhrsUseMagnetometer = true;
-  //    }
-  //    else
-  //    {
-  //      this->Internal->AhrsUseMagnetometer = false;
-  //    }
-  //  }
-  //  else
-  //  {
-  //    LOG_ERROR("Unable to recognize AHRS algorithm type: " << ahrsAlgoName << ". Supported types: MADGWICK_MARG, MAHONY_MARG, MADGWICK_IMU, MAHONY_IMU");
-  //    return PLUS_FAIL;
-  //  }
-  //}
-  //const char* FilteredTiltSensorAhrsAlgoName = deviceConfig->GetAttribute("FilteredTiltSensorAhrsAlgorithm");
-  //if (FilteredTiltSensorAhrsAlgoName != NULL)
-  //{
-  //  if (STRCASECMP("MADGWICK_IMU", FilteredTiltSensorAhrsAlgoName) == 0)
-  //  {
-  //    if (dynamic_cast<MadgwickAhrsAlgo*>(this->Internal->FilteredTiltSensorAhrsAlgo) == 0)
-  //    {
-  //      // not the requested type
-  //      // delete the old algo and create a new one with the correct type
-  //      delete this->Internal->FilteredTiltSensorAhrsAlgo;
-  //      this->Internal->FilteredTiltSensorAhrsAlgo = new MadgwickAhrsAlgo;
-  //    }
-  //  }
-  //  else if (STRCASECMP("MAHONY_IMU", FilteredTiltSensorAhrsAlgoName) == 0)
-  //  {
-  //    if (dynamic_cast<MahonyAhrsAlgo*>(this->Internal->FilteredTiltSensorAhrsAlgo) == 0)
-  //    {
-  //      // not the requested type
-  //      // delete the old algo and create a new one with the correct type
-  //      delete this->Internal->FilteredTiltSensorAhrsAlgo;
-  //      this->Internal->FilteredTiltSensorAhrsAlgo = new MahonyAhrsAlgo;
-  //    }
-  //  }
-  //  else
-  //  {
-  //    LOG_ERROR("Unable to recognize AHRS algorithm type for Filtered Tilt: " << FilteredTiltSensorAhrsAlgoName << ". Supported types: MADGWICK_IMU, MAHONY_IMU");
-  //    return PLUS_FAIL;
-  //  }
-  //}
 
   return PLUS_SUCCESS;
 }
@@ -1021,40 +416,18 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
-  // parse probe type, serial number & path to security key directory
-  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-    ProbeType, this->Internal->ProbeType, deviceConfig);
+  // TODO: frame size
+  
+
+  // probe serial number
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     ProbeSerialNum, this->Internal->ProbeSerialNum, deviceConfig);
+
+  // path to Clarius certificate
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     PathToCert, this->Internal->PathToCert, deviceConfig);
   
-  // parse connection information
-  if (ParseConnectionConfig(deviceConfig) != PLUS_SUCCESS)
-  {
-    return PLUS_FAIL;
-  }
-
-  // parse autogain & color gain / pulse frequency parameters
-  if (ParseGainConfig(deviceConfig) != PLUS_SUCCESS)
-  {
-    return PLUS_FAIL;
-  }
-
-  // parse IMU settings
-  if (ParseImuConfig(deviceConfig) != PLUS_SUCCESS)
-  {
-    return PLUS_FAIL;
-  }
-
-  // if not specified, the default value for FrameWidth is 640 and FrameHeight is 480 according to clarius;
-  /*int frame_width, frame_height;
-  XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(int, FrameWidth, frame_width, deviceConfig);
-  XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(int, FrameHeight, frame_height, deviceConfig);
-  this->ImagingParameters->SetImageSize(frame_width, frame_height, 1);
-
-  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(WriteImagesToDisk, this->Internal->WriteImagesToDisk, deviceConfig);*/
-  
+  // TODO: print configuration
   return PLUS_SUCCESS;
 }
 
@@ -1065,16 +438,6 @@ PlusStatus vtkPlusClariusOEM::WriteConfiguration(vtkXMLDataElement* rootConfigEl
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_WRITING(deviceConfig, rootConfigElement);
 
-  deviceConfig->SetAttribute("IpAddress", this->Internal->IpAddress.c_str());
-  deviceConfig->SetIntAttribute("TcpPort", this->Internal->TcpPort);
-  FrameSizeType fs = this->ImagingParameters->GetImageSize();
-  deviceConfig->SetIntAttribute("FrameWidth", fs[0]);
-  deviceConfig->SetIntAttribute("FrameHeight", fs[1]);
-  XML_WRITE_BOOL_ATTRIBUTE_NONMEMBER(ImuEnabled, this->Internal->ImuEnabled, deviceConfig);
-  if (this->Internal->ImuEnabled)
-  {
-    deviceConfig->SetAttribute("ImuOutputFileName", this->Internal->ImuOutputFileName.c_str());
-  }
   return PLUS_SUCCESS;
 }
 
@@ -1519,32 +882,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   }
 
   vtkIGSIOAccurateTimer::Delay(1.0);
-
-  //if (this->Internal->ImuEnabled)
-  //{
-  //  this->Internal->RawImuDataStream.open(this->Internal->ImuOutputFileName, std::ofstream::app);
-  //  this->Internal->RawImuDataStream << "FrameNum,SystemTimestamp,ConvertedTimestamp,ImageTimestamp,ImuTimeStamp,ax,ay,az,gx,gy,gz,mx,my,mz,\n";
-
-  //  this->Internal->RawImuDataStream.close();
-  //}
-
-  //this->Internal->AccelerometerTool = NULL;
-  //this->GetToolByPortName("Accelerometer", this->Internal->AccelerometerTool);
-
-  //this->Internal->GyroscopeTool = NULL;
-  //this->GetToolByPortName("Gyroscope", this->Internal->GyroscopeTool);
-
-  //this->Internal->MagnetometerTool = NULL;
-  //this->GetToolByPortName("Magnetometer", this->Internal->MagnetometerTool);
-
-  //this->Internal->TiltSensorTool = NULL;
-  //this->GetToolByPortName("TiltSensor", this->Internal->TiltSensorTool);
-
-  //this->Internal->FilteredTiltSensorTool = NULL;
-  //this->GetToolByPortName("FilteredTiltSensor", this->Internal->FilteredTiltSensorTool);
-
-  //this->Internal->OrientationSensorTool = NULL;
-  //this->GetToolByPortName("OrientationSensor", this->Internal->OrientationSensorTool);
 
   return PLUS_SUCCESS;
 };
