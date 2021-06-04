@@ -14,6 +14,7 @@
 #include "PixelCodec.h"
 #include "vtkPlusDataSource.h"
 #include "vtkPlusUsImagingParameters.h"
+#include "ClariusWifiHelper.h"
 
 // IGSIO includes
 #include <vtkIGSIOAccurateTimer.h>
@@ -39,9 +40,9 @@
 
 namespace
 {
-  // TODO: convert this to FrameSizeType
-  static const int DEFAULT_FRAME_WIDTH = 640;
-  static const int DEFAULT_FRAME_HEIGHT = 480;
+  static const FrameSizeType DEFAULT_FRAME_SIZE = { 512, 512, 1 };
+
+  static const double DEFAULT_DEPTH_MM = 100.0;
 
   static std::map<int, std::string> ConnectEnumToString {
     {CONNECT_SUCCESS, "CONNECT_SUCCESS"},
@@ -64,7 +65,6 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::instance;
 class vtkPlusClariusOEM::vtkInternal
 {
 public:
-  
 
   vtkInternal(vtkPlusClariusOEM* ext);
 
@@ -107,8 +107,10 @@ protected:
   // user configurable params
   std::string ProbeSerialNum;
   std::string PathToCert;
-
+  
   // system parameters
+  std::string Ssid;
+  std::string Password;
   std::string IpAddress;
   int TcpPort;
 
@@ -118,6 +120,8 @@ protected:
 
 private:
   vtkPlusClariusOEM* External;
+
+  ClariusWifiHelper WifiHelper;
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -324,11 +328,14 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::New()
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkPlusClariusOEM()
   : Internal(new vtkInternal(this))
+  , DepthMm(-1)
 {
   this->StartThreadForInternalUpdates = false;
-  this->ImagingParameters->SetImageSize(DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT, 1);
-
   this->RequirePortNameInDeviceSetConfiguration = true;
+
+  this->FrameSize[0] = DEFAULT_FRAME_SIZE[0];
+  this->FrameSize[1] = DEFAULT_FRAME_SIZE[1];
+  this->FrameSize[2] = DEFAULT_FRAME_SIZE[2];
 
   instance = this;
 }
@@ -369,6 +376,53 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::GetInstance()
     return instance;
   }
 }
+
+//-------------------------------------------------------------------------------------------------
+#define CLARIUS_IMAGING_PARAMETER_GET(parameterName, parameterIndex) \
+PlusStatus vtkPlusClariusOEM::Get##parameterName(double &a##parameterName) \
+{ \
+  if (!this->Connected) \
+  { \
+    /* Connection has not been established yet. Return cached parameter value. */ \
+    a##parameterName=this->parameterName; \
+    return PLUS_SUCCESS; \
+  } \
+  double paramVal = cusOemGetParam(parameterIndex); \
+  if (paramVal < 0) \
+  { \
+    LOG_ERROR("vtkPlusClariusOEM parameter getting failed: " << #parameterName << "="<< a##parameterName); \
+    return PLUS_FAIL; \
+  } \
+  a##parameterName = this->parameterName; \
+  return PLUS_SUCCESS; \
+}
+
+//-------------------------------------------------------------------------------------------------
+#define CLARIUS_IMAGING_PARAMETER_SET(parameterName, parameterIndex) \
+PlusStatus vtkPlusClariusOEM::Set##parameterName(double a##parameterName) \
+{ \
+  LOG_INFO("Setting US parameter "<<#parameterName<<"="<<a##parameterName); \
+  if (!this->Connected) \
+  { \
+    /* Connection has not been established yet. Parameter value will be set upon connection. */ \
+    this->parameterName=a##parameterName; \
+    return PLUS_SUCCESS; \
+  } \
+  int oldParamValue = this->parameterName; \
+  this->parameterName=a##parameterName; \
+  if (!cusOemSetParam(parameterIndex, this->parameterName)) \
+  { \
+    LOG_ERROR("vtkPlusClariusOEM parameter setting failed: " << #parameterName << "=" << a##parameterName); \
+    this->parameterName=oldParamValue; \
+    return PLUS_FAIL; \
+  } \
+  return PLUS_SUCCESS; \
+}
+
+//-------------------------------------------------------------------------------------------------
+CLARIUS_IMAGING_PARAMETER_GET(DepthMm, PARAM_DEPTH);
+
+CLARIUS_IMAGING_PARAMETER_SET(DepthMm, PARAM_DEPTH);
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
@@ -416,8 +470,24 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
-  // TODO: frame size
-  
+  // frame size
+  int rfs[2] = { static_cast<int>(DEFAULT_FRAME_SIZE[0]), static_cast<int>(DEFAULT_FRAME_SIZE[1]) };
+  if (deviceConfig->GetVectorAttribute("FrameSize", 2, rfs))
+  {
+    if (rfs[0] < 0 || rfs[1] < 0)
+    {
+      LOG_ERROR("Negative frame size defined in config file. Please define a positive frame size.");
+      return PLUS_FAIL;
+    }
+    this->FrameSize[0] = static_cast<unsigned int>(rfs[0]);
+    this->FrameSize[1] = static_cast<unsigned int>(rfs[1]);
+    this->FrameSize[2] = 1;
+  }
+  this->ImagingParameters->SetImageSize(
+    this->FrameSize[0],
+    this->FrameSize[1],
+    this->FrameSize[2]
+  );
 
   // probe serial number
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
@@ -427,6 +497,17 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     PathToCert, this->Internal->PathToCert, deviceConfig);
   
+  // depth (cm)
+  XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, DepthMm, deviceConfig);
+  if (this->DepthMm < 0)
+  {
+    this->DepthMm = DEFAULT_DEPTH_MM;
+  }
+
+  // gain (%)
+
+  // dynamic range (%)
+
   // TODO: print configuration
   return PLUS_SUCCESS;
 }
@@ -437,6 +518,9 @@ PlusStatus vtkPlusClariusOEM::WriteConfiguration(vtkXMLDataElement* rootConfigEl
   LOG_TRACE("vtkPlusClariusOEM::WriteConfiguration");
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_WRITING(deviceConfig, rootConfigElement);
+
+  // depth (cm)
+  deviceConfig->SetDoubleAttribute("DepthMm", this->DepthMm);
 
   return PLUS_SUCCESS;
 }
@@ -647,6 +731,8 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
     LOG_INFO("Control Port: " << info.ControlPort);
     LOG_INFO("Cast Port: " << info.CastPort);
 
+    this->Internal->Ssid = info.SSID;
+    this->Internal->Password = info.Password;
     this->Internal->IpAddress = info.IPv4;
     this->Internal->TcpPort = info.ControlPort;
   }
@@ -655,7 +741,47 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::ConnectToClariusWifi(vtkPlusClariusOEM* device)
+{
+  if (device->Internal->WifiHelper.Initialize() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to initialize Clarius wifi helper");
+    return PLUS_FAIL;
+  }
+
+  PlusStatus res = device->Internal->WifiHelper.ConnectToClariusWifi(
+    device->Internal->Ssid,
+    device->Internal->Password
+  );
+  if (res != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to connect to Clarius probe wifi");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::DisconnectFromClariusWifi(vtkPlusClariusOEM* device)
+{
+  if (device->Internal->WifiHelper.DisconnectFromClariusWifi() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to disconnect from Clarius probe wifi");
+    return PLUS_FAIL;
+  }
+
+  if (device->Internal->WifiHelper.DeInitialize() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to de-initialize Clarius wifi helper");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
 {
   // placeholder argc / argv arguments
   int argc = 1;
@@ -697,6 +823,8 @@ PlusStatus vtkPlusClariusOEM::InitializeClarius(vtkPlusClariusOEM* device)
   try
   {
     FrameSizeType fs = this->ImagingParameters->GetImageSize();
+
+    LOG_INFO("fs: [" << fs[0] << ", " << fs[1] << "]");
 
     int result = cusOemInit(
       argc,
@@ -825,43 +953,51 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   if (!this->Internal->ProbeConnected)
   {
-    // power on the probe & get TCP/IP values
+    // power on the probe & get ssid, password & tcp params
     if (this->PowerOnClarius(device) != PLUS_SUCCESS)
     {
       LOG_ERROR("Failed to power on Clarius probe");
       return PLUS_FAIL;
     }
+
+    // connect to probe wifi
+    if (this->ConnectToClariusWifi(device) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to connect to Clarius wifi network");
+      this->PowerOffClarius(device);
+      return PLUS_FAIL;
+    }
     
     // initialize Clarius OEM library
-    if (this->InitializeClarius(device) != PLUS_SUCCESS)
+    if (this->InitializeClariusOem(device) != PLUS_SUCCESS)
     {
+      LOG_ERROR("Failed to initalize Clarius.");
       cusOemDestroy();
       this->PowerOffClarius(device);
-      LOG_ERROR("Failed to initalize Clarius.");
       return PLUS_FAIL;
     }
 
     // set Clarius certificate
     if (this->SetClariusCert(device) != PLUS_SUCCESS)
     {
+      LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to.");
       this->PowerOffClarius(device);
       cusOemDestroy();
-      LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to.");
       return PLUS_FAIL;
     }
 
     // connect to Clarius probe
     if (this->ConnectToClarius(device) != PLUS_SUCCESS)
     {
+      LOG_ERROR("Failed to connect to Clarius probe.");
       this->PowerOffClarius(device);
       cusOemDestroy();
-      LOG_ERROR("Failed to connect to Clarius probe.");
       return PLUS_FAIL;
     }
   }
   else
   {
-    LOG_ERROR("Scanner already connected");
+    LOG_WARNING("Scanner already connected");
   }
 
   vtkIGSIOAccurateTimer::Delay(1.0);
@@ -882,6 +1018,13 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   }
 
   vtkIGSIOAccurateTimer::Delay(1.0);
+
+  // set imaging parameters
+  double depth_cm = this->DepthMm / 10.0;
+  if (cusOemSetParam(PARAM_DEPTH, depth_cm) != 0)
+  {
+    LOG_WARNING("Failed to set requested imaging depth in Clarius OEM device, undefined depth will be used");
+  }
 
   return PLUS_SUCCESS;
 };
@@ -948,7 +1091,7 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (this->Internal->ProbeConnected)
+  if (device->Internal->ProbeConnected)
   {
     if (cusOemDisconnect() < 0)
     {
@@ -962,7 +1105,13 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
       return PLUS_SUCCESS;
     }
 
-    if (this->PowerOffClarius(device) != PLUS_SUCCESS)
+    if (device->DisconnectFromClariusWifi(device) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to disconnect from Clarius probe wifi network");
+      return PLUS_FAIL;
+    }
+
+    if (device->PowerOffClarius(device) != PLUS_SUCCESS)
     {
       LOG_ERROR("Failed to power off Clarius probe");
       return PLUS_FAIL;

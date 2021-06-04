@@ -68,6 +68,23 @@ public:
   /*! return the singleton instance with no reference counting */
   static vtkPlusClariusOEM* GetInstance();
 
+  // US parameters API
+
+  /*! Get the imaging depth of B-mode ultrasound (mm) */
+  PlusStatus GetDepthMm(double& aDepthMm);
+  /*! Set the imaging depth of B-mode ultrasound (mm) */
+  PlusStatus SetDepthMm(double aDepthMm);
+
+  /*! Set the gain percentage of B-mode ultrasound (valid range: 0-100) */
+
+  /*! Get the gain percentage of B-mode ultrasound (valid range: 0-100) */
+
+  /*! Set the dynamic range of B-mode ultrasound (dB)*/
+  PlusStatus SetDynRangeDb(double aDynamicRange);
+  /*! Get the dynamic range of B-mode ultrasound (dB)*/
+  PlusStatus GetDynRangeDb(double& aDynamicRange);
+
+
 protected:
   vtkPlusClariusOEM();
   ~vtkPlusClariusOEM();
@@ -77,8 +94,12 @@ private:
   PlusStatus PowerOnClarius(vtkPlusClariusOEM* device);
 
   PlusStatus PowerOffClarius(vtkPlusClariusOEM* device);
+
+  PlusStatus ConnectToClariusWifi(vtkPlusClariusOEM* device);
+
+  PlusStatus DisconnectFromClariusWifi(vtkPlusClariusOEM* device);
     
-  PlusStatus InitializeClarius(vtkPlusClariusOEM* device);
+  PlusStatus InitializeClariusOem(vtkPlusClariusOEM* device);
 
   PlusStatus SetClariusCert(vtkPlusClariusOEM* device);
 
@@ -94,6 +115,12 @@ protected:
   PlusStatus InternalStopRecording() override;
 
   static vtkPlusClariusOEM* instance;
+
+  FrameSizeType FrameSize;
+
+  double DepthMm;
+  double GainPercent;
+  double DynamicRangePercent;
 
   class vtkInternal;
   vtkInternal* Internal;

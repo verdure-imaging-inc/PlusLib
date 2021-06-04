@@ -894,10 +894,12 @@ IF(PLUS_USE_CLARIUS_OEM)
   GET_TARGET_PROPERTY(CBTLib_BINARY_RELEASE CBTLib IMPORTED_LOCATION_RELEASE)
 
   SET(CLARIUS_OEM_SRCS
+    Clarius/ClariusWifiHelper.cxx
     Clarius/vtkPlusClariusOEM.cxx
     )
   IF(MSVC OR ${CMAKE_GENERATOR} MATCHES "Xcode")
     SET(CLARIUS_OEM_HDRS
+      Clarius/ClariusWifiHelper.h
       Clarius/vtkPlusClariusOEM.h
       )
   ENDIF()
