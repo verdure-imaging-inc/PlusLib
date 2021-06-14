@@ -57,6 +57,7 @@ OPTION(PLUS_USE_INFRARED_SEEK_CAM "Provide support for capturing an Infrared See
 OPTION(PLUS_USE_ANDOR_CAMERA "Provide support for capturing images from Andor Camera. Requires PLUS_USE_OpenCV." OFF)
 OPTION(PLUS_USE_INFRARED_TEQ1_CAM "Provide support for capturing an Infrared Therma Expert Q1 Camera capture stream" OFF)
 OPTION(PLUS_USE_WITMOTIONTRACKER "Provide support for the WitMotion class of inertial measurement units" OFF)
+OPTION(PLUS_USE_MODUS_SCRAPER "Provide support for API scraping the Synaptive Modus developer website" OFF)
 
 OPTION(PLUS_USE_LEAPMOTION "Provide support for the LeapMotion hand tracker" OFF)
 IF(PLUS_USE_LEAPMOTION)
@@ -2480,6 +2481,20 @@ IF(PLUS_USE_STEAMVR)
   ENDIF()
   LIST(APPEND External_Libraries_Install
     ${_install_file}
+    )
+ENDIF()
+
+# --------------------------------------------------------------------------
+# Modus website scraper support
+IF(PLUS_USE_MODUS_SCRAPER)
+  LIST(APPEND ${PROJECT_NAME}_HDRS
+    ModusScraper/vtkPlusModusScraperTextSource.h
+    )
+  LIST(APPEND ${PROJECT_NAME}_SRCS
+    ModusScraper/vtkPlusModusScraperTextSource.cxx
+    )
+  LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ModusScraper
     )
 ENDIF()
 

@@ -109,6 +109,7 @@
 #cmakedefine PLUS_USE_LEAPMOTION
 #cmakedefine PLUS_USE_CLARIUS
 #cmakedefine PLUS_USE_STEAMVR
+#cmakedefine PLUS_USE_MODUS_SCRAPER
 
 #cmakedefine PLUS_USE_VP9
 #cmakedefine PLUS_USE_MKV_IO

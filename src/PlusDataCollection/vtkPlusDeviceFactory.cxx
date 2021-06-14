@@ -95,6 +95,12 @@ See License.txt for details.
 #endif
 
 //----------------------------------------------------------------------------
+// Text sources
+#ifdef PLUS_USE_MODUS_SCRAPER
+#include "vtkPlusModusScraperTextSource.h"
+#endif
+
+//----------------------------------------------------------------------------
 // Video sources
 #include "vtkPlusSavedDataSource.h"
 #include "vtkPlusUsSimulatorVideoSource.h"
