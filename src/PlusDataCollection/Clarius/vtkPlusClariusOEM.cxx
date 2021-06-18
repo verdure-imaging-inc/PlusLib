@@ -131,11 +131,24 @@ protected:
   bool EnableImu;
   bool EnableButtons;
 
-  // system parameters (set from data received over Bluetooth low energy)
+  // parameters retrieved from the probe over BLE
   std::string Ssid;
   std::string Password;
   std::string IpAddress;
   int TcpPort;
+
+  // parameters retrieved from the probe using the OEM API
+  std::vector<std::string> ValidProbes;
+  bool ValidProbesPopulated;
+  std::vector<std::string> ValidApplications;
+  bool ValidApplicationsPopulated;
+
+  enum class EXPECTED_LIST
+  {
+    PROBES,
+    APPLICATIONS,
+    UNKNOWN
+  } ExpectedList;
 
 private:
   vtkPlusClariusOEM* External;
@@ -157,13 +170,48 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , EnableButtons(DEFAULT_ENABLE_BUTTONS)
 , IpAddress("")
 , TcpPort(-1)
+, ValidProbesPopulated(false)
+, ValidApplicationsPopulated(false)
 {
 }
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ListFn(const char* list, int sz)
 {
-  LOG_INFO("ListFn: " << list);
+  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+  
+  std::vector<std::string>* vec;
+  if (device->Internal->ExpectedList == EXPECTED_LIST::PROBES)
+  {
+    vec = &device->Internal->ValidProbes;
+  }
+  else if (device->Internal->ExpectedList == EXPECTED_LIST::APPLICATIONS)
+  {
+    vec = &device->Internal->ValidApplications;
+  }
+  else
+  {
+    LOG_ERROR("Unexpected list processed with values: " << list);
+    return;
+  }
+
+  vec->clear();
+  std::stringstream ss(list);
+  while (ss.good())
+  {
+    std::string substr;
+    getline(ss, substr, ',');
+    vec->push_back(substr);
+  }
+
+  if (device->Internal->ExpectedList == EXPECTED_LIST::PROBES)
+  {
+    device->Internal->ValidProbesPopulated = true;
+  }
+  else if (device->Internal->ExpectedList == EXPECTED_LIST::APPLICATIONS)
+  {
+    device->Internal->ValidApplicationsPopulated = true;
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -459,6 +507,13 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   // probe type
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     ProbeType, this->Internal->ProbeType, deviceConfig);
+  // force probe type string to be entirely uppercase
+  std::transform(
+    this->Internal->ProbeType.begin(),
+    this->Internal->ProbeType.end(),
+    this->Internal->ProbeType.begin(),
+    [](unsigned char c) { return std::toupper(c); }
+  );
 
   // imaging application (msk, abdomen, etc.)
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
@@ -468,7 +523,7 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
     this->Internal->ImagingApplication.begin(),
     this->Internal->ImagingApplication.end(),
     this->Internal->ImagingApplication.begin(),
-    [](unsigned char c) {return std::tolower(c); }
+    [](unsigned char c) { return std::tolower(c); }
   );
 
   // frame size
@@ -991,14 +1046,66 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   vtkIGSIOAccurateTimer::Delay(1.0);
 
+  // print device stats
   ClariusStatusInfo stats;
   if (cusOemStatusInfo(&stats) == 0)
     LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
 
+  // list available probes
+  ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
+  this->Internal->ExpectedList = vtkPlusClariusOEM::vtkInternal::EXPECTED_LIST::PROBES;
+  if (cusOemProbes(listFnPtr) != 0)
+  {
+    LOG_INFO("Failed to retrieve list of valid probe types");
+    return PLUS_FAIL;
+  }
+
+  // busy wait for probes list to populate
+  while (!this->Internal->ValidProbesPopulated) {}
+
+  // validate provided probe type
+  std::string probeType = this->Internal->ProbeType;
+  std::vector<std::string> vProbes = this->Internal->ValidProbes;
+  if (std::find(vProbes.begin(), vProbes.end(), probeType) == vProbes.end())
+  {
+    std::string vProbesStr;
+    for (const auto& probe : vProbes)
+    {
+      vProbesStr += probe + ", ";
+    }
+    vProbesStr.pop_back(); vProbesStr.pop_back(); // remove trailing comma and space
+    LOG_ERROR("Invalid probe type (" << probeType << ") provided, valid probe types are: " << vProbesStr);
+    return PLUS_FAIL;
+  }
+
+  // list available imaging applications
+  this->Internal->ExpectedList = vtkPlusClariusOEM::vtkInternal::EXPECTED_LIST::APPLICATIONS;
+  if (cusOemApplications(probeType.c_str(), listFnPtr) != 0)
+  {
+    LOG_ERROR("Failed to retrieve list of valid imaging applications");
+    return PLUS_FAIL;
+  }
+
+  // busy wait for applications list to populate
+  while (!this->Internal->ValidApplicationsPopulated) {}
+
+  // validate provided imaging application
+  std::string imagingApplication = this->Internal->ImagingApplication;
+  std::vector<std::string> vApps = this->Internal->ValidApplications;
+  if (std::find(vApps.begin(), vApps.end(), imagingApplication) == vApps.end())
+  {
+    std::string vAppsStr;
+    for (const auto& app : vApps)
+    {
+      vAppsStr += app + ", ";
+    }
+    vAppsStr.pop_back(); vAppsStr.pop_back(); // remove trailing comma and space
+    LOG_ERROR("Invalid imaging application (" << imagingApplication<< ") provided, valid imaging applications are: " << vAppsStr);
+    return PLUS_FAIL;
+  }
+
   // configure probe
-  const char* probeType = this->Internal->ProbeType.c_str();
-  const char* imagingApplication = this->Internal->ImagingApplication.c_str();
-  if (cusOemLoadApplication(probeType, imagingApplication) == 0)
+  if (cusOemLoadApplication(probeType.c_str(), imagingApplication.c_str()) == 0)
   {
     LOG_INFO("Attempting to load " << imagingApplication << " application on a " << probeType << " probe");
   }
