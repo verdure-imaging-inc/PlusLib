@@ -451,20 +451,9 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     PathToCert, this->Internal->PathToCert, deviceConfig);
   
+  // read imaging parameters
   this->ImagingParameters->ReadConfiguration(deviceConfig);
 
-  // depth (mm)
-  //XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, DepthMm, deviceConfig);
-  //if (this->DepthMm < 0)
-  //{
-  //  this->DepthMm = DEFAULT_DEPTH_MM;
-  //}
-
-  // gain (%)
-
-  // dynamic range (%)
-
-  // TODO: print configuration
   return PLUS_SUCCESS;
 }
 

@@ -466,8 +466,8 @@ PlusStatus vtkPlusUsImagingParameters::ReadConfiguration(vtkXMLDataElement* devi
   for (int i = 0; i < parameterList->GetNumberOfNestedElements(); ++i)
   {
     vtkXMLDataElement* element = parameterList->GetNestedElement(i);
-    std::string name = element->GetAttribute("name") ? element->GetAttribute("name") : "";
-    std::string value = element->GetAttribute("value") ? element->GetAttribute("value") : "";
+    std::string name = element->GetAttribute("Name") ? element->GetAttribute("Name") : "";
+    std::string value = element->GetAttribute("Value") ? element->GetAttribute("Value") : "";
     if (name.empty())
     {
       continue;
