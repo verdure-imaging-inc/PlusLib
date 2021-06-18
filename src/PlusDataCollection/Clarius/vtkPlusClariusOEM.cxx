@@ -123,10 +123,6 @@ protected:
   std::string IpAddress;
   int TcpPort;
 
-  // is there currently a probe connected
-  // TODO: rename this OemConnected or OemProbeConnected
-  bool ProbeConnected;
-
 private:
   vtkPlusClariusOEM* External;
 
@@ -141,7 +137,6 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , PathToCert("")
 , IpAddress("")
 , TcpPort(-1)
-, ProbeConnected(false)
 {
 }
 
@@ -158,7 +153,7 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* st
   {
     // connection succeeded, set Internal->Connected variable to end busy wait in InternalConnect
     vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-    device->Internal->ProbeConnected = true;
+    device->Connected = true;
   }
 }
 
@@ -889,7 +884,7 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
   // get start timestamp
   std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
-  while (!Internal->ProbeConnected)
+  while (!this->Connected)
   {
     std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
     std::chrono::duration<double> dur = t - startTime;
@@ -911,7 +906,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
 
-  if (!this->Internal->ProbeConnected)
+  if (!this->Connected)
   {
     // power on the probe & get ssid, password & tcp params
     if (this->PowerOnClarius(device) != PLUS_SUCCESS)
@@ -1072,7 +1067,7 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device->Internal->ProbeConnected)
+  if (device->Connected)
   {
     if (cusOemDisconnect() < 0)
     {
@@ -1215,12 +1210,11 @@ PlusStatus vtkPlusClariusOEM::GetDepthMm(double& aDepthMm)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::SetDepthMm(double aDepthMm)
 {
-  LOG_INFO("Setting US parameter DepthMm");
-
   if (!this->Connected)
   {
     // Connection has not been established yet, parameter value will be set upon connection
     this->ImagingParameters->SetDepthMm(aDepthMm);
+    LOG_INFO("Cached US parameter DepthMm = " << aDepthMm);
     return PLUS_SUCCESS;
   }
 
@@ -1266,12 +1260,11 @@ PlusStatus vtkPlusClariusOEM::GetGainPercent(double& aGainPercent)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::SetGainPercent(double aGainPercent)
 {
-  LOG_INFO("Setting US parameter GainPercent");
-
   if (!this->Connected)
   {
     // Connection has not been established yet, parameter value will be set upon connection
     this->ImagingParameters->SetGainPercent(aGainPercent);
+    LOG_INFO("Cached US parameter GainPercent = " << aGainPercent);
     return PLUS_SUCCESS;
   }
 
@@ -1291,7 +1284,6 @@ PlusStatus vtkPlusClariusOEM::SetGainPercent(double aGainPercent)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::GetDynRangePercent(double& aDynRangePercent)
 {
-
   if (!this->Connected)
   {
     // Connection has not been established yet, return cached parameter value
@@ -1317,12 +1309,11 @@ PlusStatus vtkPlusClariusOEM::GetDynRangePercent(double& aDynRangePercent)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::SetDynRangePercent(double aDynRangePercent)
 {
-  LOG_INFO("Setting US parameter DynRange");
-
   if (!this->Connected)
   {
     // Connection has not been established yet, parameter value will be set upon connection
     this->ImagingParameters->SetDynRangeDb(aDynRangePercent);
+    LOG_INFO("Cached US parameter DynRangePercent = " << aDynRangePercent);
     return PLUS_SUCCESS;
   }
 
@@ -1351,7 +1342,7 @@ PlusStatus vtkPlusClariusOEM::GetTimeGainCompensationPercent(std::vector<double>
   ClariusTgc cTGC;
   if (cusOemGetTgc(&cTGC) < 0)
   {
-    LOG_ERROR("vtkPlusClariusOEM failed to get time gain compensation parameter");
+    LOG_ERROR("Failed to get time gain compensation parameter");
     return PLUS_FAIL;
   }
 
@@ -1370,9 +1361,6 @@ PlusStatus vtkPlusClariusOEM::GetTimeGainCompensationPercent(std::vector<double>
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::SetTimeGainCompensationPercent(const std::vector<double>& aTGC)
 {
-  LOG_INFO("Setting US parameter time gain compensation to [" << aTGC[0] << ", " << aTGC[1]
-    << ", " << aTGC[2] << "]");
-  
   if (aTGC.size() != 3)
   {
     LOG_ERROR("vtkPlusClariusOEM time gain compensation parameter must be provided a vector of exactly 3 doubles [top gain, mid gain, bottom gain]");
@@ -1383,6 +1371,7 @@ PlusStatus vtkPlusClariusOEM::SetTimeGainCompensationPercent(const std::vector<d
   {
     // Connection has not been established yet, parameter value will be set upon connection
     this->ImagingParameters->SetTimeGainCompensation(aTGC);
+    LOG_INFO("Cached US parameter TGC = [" << aTGC[0] << ", " << aTGC[1] << ", " << aTGC[2] << "]");
     return PLUS_SUCCESS;
   }
 
@@ -1392,11 +1381,12 @@ PlusStatus vtkPlusClariusOEM::SetTimeGainCompensationPercent(const std::vector<d
   cTGC.bottom = aTGC[2];
   if (cusOemSetTgc(&cTGC) < 0)
   {
-    LOG_ERROR("vtkPlusClariusOEM failed to set time gain compensation");
+    LOG_ERROR("Failed to set time gain compensation parameter");
     return PLUS_FAIL;
   }
 
   // update imaging parameters & return successfully
   this->ImagingParameters->SetTimeGainCompensation(aTGC);
+  LOG_INFO("Set US parameter TGC to [" << aTGC[0] << ", " << aTGC[1] << ", " << aTGC[2] << "]");
   return PLUS_SUCCESS;
 }
