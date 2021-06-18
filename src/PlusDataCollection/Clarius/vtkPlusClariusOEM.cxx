@@ -47,11 +47,17 @@ namespace
 
   static const FrameSizeType DEFAULT_FRAME_SIZE = { 512, 512, 1 };
 
+  static const bool DEFAULT_ENABLE_AUTO_GAIN = false;
+
+  static const bool DEFAULT_ENABLE_IMU = false;
+
+  static const bool DEFAULT_ENABLE_BUTTONS = false;
+
   static const double DEFAULT_DEPTH_MM = 100.0;
 
   static const double DEFAULT_GAIN_PERCENT = 80.0;
 
-  static const double DEFAULT_DYNAMIC_RANGE_PERCENT = 80.0;
+  static const double DEFAULT_DYNRANGE_PERCENT = 80.0;
 
   static const std::vector<double> DEFAULT_TGC = { 0.5, 0.5, 0.5 };
 
@@ -146,9 +152,9 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , FrameSize(DEFAULT_FRAME_SIZE)
 , ProbeType("")
 , ImagingApplication("")
-, EnableAutoGain(false)
-, EnableImu(false)
-, EnableButtons(false)
+, EnableAutoGain(DEFAULT_ENABLE_AUTO_GAIN)
+, EnableImu(DEFAULT_ENABLE_IMU)
+, EnableButtons(DEFAULT_ENABLE_BUTTONS)
 , IpAddress("")
 , TcpPort(-1)
 {
@@ -350,9 +356,9 @@ vtkPlusClariusOEM::vtkPlusClariusOEM()
   this->StartThreadForInternalUpdates = false;
   this->RequirePortNameInDeviceSetConfiguration = true;
 
-  this->ImagingParameters->SetDepthMm(80);
-  this->ImagingParameters->SetGainPercent(80);
-  this->ImagingParameters->SetDynRangeDb(80); // note this value is actually percent for the Clarius
+  this->ImagingParameters->SetDepthMm(DEFAULT_DEPTH_MM);
+  this->ImagingParameters->SetGainPercent(DEFAULT_GAIN_PERCENT);
+  this->ImagingParameters->SetDynRangeDb(DEFAULT_DYNRANGE_PERCENT);
   
   this->ImagingParameters->SetTimeGainCompensation(DEFAULT_TGC);
 
