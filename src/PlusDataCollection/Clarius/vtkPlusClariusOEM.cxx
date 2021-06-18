@@ -116,8 +116,9 @@ protected:
   // user configurable params
   std::string ProbeSerialNum;
   std::string PathToCert;
+  FrameSizeType FrameSize;
   
-  // system parameters
+  // system parameters (set from data received over Bluetooth low energy)
   std::string Ssid;
   std::string Password;
   std::string IpAddress;
@@ -135,6 +136,7 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , BluetoothInterface(nullptr)
 , ProbeSerialNum("")
 , PathToCert("")
+, FrameSize(DEFAULT_FRAME_SIZE)
 , IpAddress("")
 , TcpPort(-1)
 {
@@ -336,8 +338,6 @@ vtkPlusClariusOEM::vtkPlusClariusOEM()
   this->StartThreadForInternalUpdates = false;
   this->RequirePortNameInDeviceSetConfiguration = true;
 
-  this->ImagingParameters->SetImageSize(DEFAULT_FRAME_SIZE);
-
   this->ImagingParameters->SetDepthMm(80);
   this->ImagingParameters->SetGainPercent(80);
   this->ImagingParameters->SetDynRangeDb(80); // note this value is actually percent for the Clarius
@@ -393,7 +393,7 @@ void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
   os << indent << "ipAddress" << this->Internal->IpAddress << std::endl;
   os << indent << "tcpPort" << this->Internal->TcpPort << std::endl;
   os << indent << "FrameNumber" << this->FrameNumber << std::endl;
-  FrameSizeType fs = this->ImagingParameters->GetImageSize();
+  FrameSizeType fs = this->Internal->FrameSize;
   os << indent << "FrameWidth" << fs[0] << std::endl;
   os << indent << "FrameHeight" << fs[1] << std::endl;
 }
@@ -430,6 +430,26 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
+  // probe serial number
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
+    ProbeSerialNum, this->Internal->ProbeSerialNum, deviceConfig);
+
+  // path to Clarius certificate
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
+    PathToCert, this->Internal->PathToCert, deviceConfig);
+  
+
+
+
+
+
+
+
+
+
+
+
+
   // frame size
   int rfs[2] = { static_cast<int>(DEFAULT_FRAME_SIZE[0]), static_cast<int>(DEFAULT_FRAME_SIZE[1]) };
   if (deviceConfig->GetVectorAttribute("FrameSize", 2, rfs))
@@ -440,17 +460,11 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
       return PLUS_FAIL;
     }
     FrameSizeType fs = { static_cast<unsigned int>(rfs[0]), static_cast<unsigned int>(rfs[1]), 1 };
-    this->ImagingParameters->SetImageSize(fs);
+    this->Internal->FrameSize = fs;
   }
 
-  // probe serial number
-  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-    ProbeSerialNum, this->Internal->ProbeSerialNum, deviceConfig);
 
-  // path to Clarius certificate
-  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
-    PathToCert, this->Internal->PathToCert, deviceConfig);
-  
+
   // read imaging parameters
   this->ImagingParameters->ReadConfiguration(deviceConfig);
 
@@ -766,7 +780,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
 
   try
   {
-    FrameSizeType fs = this->ImagingParameters->GetImageSize();
+    FrameSizeType fs = this->Internal->FrameSize;
 
     LOG_INFO("fs: [" << fs[0] << ", " << fs[1] << "]");
 
