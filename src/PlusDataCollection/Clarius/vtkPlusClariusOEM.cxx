@@ -25,6 +25,8 @@
 #include <vtkSmartPointer.h>
 
 // STL includes
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <sstream>
@@ -117,7 +119,12 @@ protected:
   std::string ProbeSerialNum;
   std::string PathToCert;
   FrameSizeType FrameSize;
-  
+  std::string ProbeType;
+  std::string ImagingApplication;
+  bool EnableAutoGain;
+  bool EnableImu;
+  bool EnableButtons;
+
   // system parameters (set from data received over Bluetooth low energy)
   std::string Ssid;
   std::string Password;
@@ -137,6 +144,11 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , ProbeSerialNum("")
 , PathToCert("")
 , FrameSize(DEFAULT_FRAME_SIZE)
+, ProbeType("")
+, ImagingApplication("")
+, EnableAutoGain(false)
+, EnableImu(false)
+, EnableButtons(false)
 , IpAddress("")
 , TcpPort(-1)
 {
@@ -438,17 +450,20 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     PathToCert, this->Internal->PathToCert, deviceConfig);
   
+  // probe type
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
+    ProbeType, this->Internal->ProbeType, deviceConfig);
 
-
-
-
-
-
-
-
-
-
-
+  // imaging application (msk, abdomen, etc.)
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
+    ImagingApplication, this->Internal->ImagingApplication, deviceConfig);
+  // force imaging application string to be entirely lowercase
+  std::transform(
+    this->Internal->ImagingApplication.begin(),
+    this->Internal->ImagingApplication.end(),
+    this->Internal->ImagingApplication.begin(),
+    [](unsigned char c) {return std::tolower(c); }
+  );
 
   // frame size
   int rfs[2] = { static_cast<int>(DEFAULT_FRAME_SIZE[0]), static_cast<int>(DEFAULT_FRAME_SIZE[1]) };
@@ -463,7 +478,17 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
     this->Internal->FrameSize = fs;
   }
 
+  // enable auto gain
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(EnableAutoGain,
+    this->Internal->EnableAutoGain, deviceConfig);
 
+  // enable IMU
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(EnableImu,
+    this->Internal->EnableImu, deviceConfig);
+
+  // enable button presses
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(EnableButtons,
+    this->Internal->EnableButtons, deviceConfig);
 
   // read imaging parameters
   this->ImagingParameters->ReadConfiguration(deviceConfig);
@@ -964,15 +989,16 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   if (cusOemStatusInfo(&stats) == 0)
     LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
 
-
   // configure probe
-  if (cusOemLoadApplication("C3HD", "msk") == 0)
+  const char* probeType = this->Internal->ProbeType.c_str();
+  const char* imagingApplication = this->Internal->ImagingApplication.c_str();
+  if (cusOemLoadApplication(probeType, imagingApplication) == 0)
   {
-    LOG_INFO("trying to load application: probe=" << "C3HD" << " application=" << "msk");
+    LOG_INFO("Attempting to load " << imagingApplication << " application on a " << probeType << " probe");
   }
   else
   {
-    LOG_ERROR("error calling load application");
+    LOG_ERROR("An error occured on call to cusOemLoadApplication");
   }
 
   vtkIGSIOAccurateTimer::Delay(2.0);
