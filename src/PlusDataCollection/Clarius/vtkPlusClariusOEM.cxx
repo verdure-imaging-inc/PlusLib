@@ -40,9 +40,18 @@
 
 namespace
 {
+  static const double CM_TO_MM = 10.0;
+  static const double MM_TO_CM = 0.1;
+
   static const FrameSizeType DEFAULT_FRAME_SIZE = { 512, 512, 1 };
 
   static const double DEFAULT_DEPTH_MM = 100.0;
+
+  static const double DEFAULT_GAIN_PERCENT = 80.0;
+
+  static const double DEFAULT_DYNAMIC_RANGE_PERCENT = 80.0;
+
+  static const std::vector<double> DEFAULT_TGC = { 0.5, 0.5, 0.5 };
 
   static std::map<int, std::string> ConnectEnumToString {
     {CONNECT_SUCCESS, "CONNECT_SUCCESS"},
@@ -328,14 +337,17 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::New()
 //-------------------------------------------------------------------------------------------------
 vtkPlusClariusOEM::vtkPlusClariusOEM()
   : Internal(new vtkInternal(this))
-  , DepthMm(-1)
 {
   this->StartThreadForInternalUpdates = false;
   this->RequirePortNameInDeviceSetConfiguration = true;
 
-  this->FrameSize[0] = DEFAULT_FRAME_SIZE[0];
-  this->FrameSize[1] = DEFAULT_FRAME_SIZE[1];
-  this->FrameSize[2] = DEFAULT_FRAME_SIZE[2];
+  this->ImagingParameters->SetImageSize(DEFAULT_FRAME_SIZE);
+
+  this->ImagingParameters->SetDepthMm(80);
+  this->ImagingParameters->SetGainPercent(80);
+  this->ImagingParameters->SetDynRangeDb(80); // note this value is actually percent for the Clarius
+  
+  this->ImagingParameters->SetTimeGainCompensation(DEFAULT_TGC);
 
   instance = this;
 }
@@ -376,53 +388,6 @@ vtkPlusClariusOEM* vtkPlusClariusOEM::GetInstance()
     return instance;
   }
 }
-
-//-------------------------------------------------------------------------------------------------
-#define CLARIUS_IMAGING_PARAMETER_GET(parameterName, parameterIndex) \
-PlusStatus vtkPlusClariusOEM::Get##parameterName(double &a##parameterName) \
-{ \
-  if (!this->Connected) \
-  { \
-    /* Connection has not been established yet. Return cached parameter value. */ \
-    a##parameterName=this->parameterName; \
-    return PLUS_SUCCESS; \
-  } \
-  double paramVal = cusOemGetParam(parameterIndex); \
-  if (paramVal < 0) \
-  { \
-    LOG_ERROR("vtkPlusClariusOEM parameter getting failed: " << #parameterName << "="<< a##parameterName); \
-    return PLUS_FAIL; \
-  } \
-  a##parameterName = this->parameterName; \
-  return PLUS_SUCCESS; \
-}
-
-//-------------------------------------------------------------------------------------------------
-#define CLARIUS_IMAGING_PARAMETER_SET(parameterName, parameterIndex) \
-PlusStatus vtkPlusClariusOEM::Set##parameterName(double a##parameterName) \
-{ \
-  LOG_INFO("Setting US parameter "<<#parameterName<<"="<<a##parameterName); \
-  if (!this->Connected) \
-  { \
-    /* Connection has not been established yet. Parameter value will be set upon connection. */ \
-    this->parameterName=a##parameterName; \
-    return PLUS_SUCCESS; \
-  } \
-  int oldParamValue = this->parameterName; \
-  this->parameterName=a##parameterName; \
-  if (!cusOemSetParam(parameterIndex, this->parameterName)) \
-  { \
-    LOG_ERROR("vtkPlusClariusOEM parameter setting failed: " << #parameterName << "=" << a##parameterName); \
-    this->parameterName=oldParamValue; \
-    return PLUS_FAIL; \
-  } \
-  return PLUS_SUCCESS; \
-}
-
-//-------------------------------------------------------------------------------------------------
-CLARIUS_IMAGING_PARAMETER_GET(DepthMm, PARAM_DEPTH);
-
-CLARIUS_IMAGING_PARAMETER_SET(DepthMm, PARAM_DEPTH);
 
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
@@ -479,15 +444,9 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
       LOG_ERROR("Negative frame size defined in config file. Please define a positive frame size.");
       return PLUS_FAIL;
     }
-    this->FrameSize[0] = static_cast<unsigned int>(rfs[0]);
-    this->FrameSize[1] = static_cast<unsigned int>(rfs[1]);
-    this->FrameSize[2] = 1;
+    FrameSizeType fs = { static_cast<unsigned int>(rfs[0]), static_cast<unsigned int>(rfs[1]), 1 };
+    this->ImagingParameters->SetImageSize(fs);
   }
-  this->ImagingParameters->SetImageSize(
-    this->FrameSize[0],
-    this->FrameSize[1],
-    this->FrameSize[2]
-  );
 
   // probe serial number
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
@@ -497,12 +456,14 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(
     PathToCert, this->Internal->PathToCert, deviceConfig);
   
-  // depth (cm)
-  XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, DepthMm, deviceConfig);
-  if (this->DepthMm < 0)
-  {
-    this->DepthMm = DEFAULT_DEPTH_MM;
-  }
+  this->ImagingParameters->ReadConfiguration(deviceConfig);
+
+  // depth (mm)
+  //XML_READ_SCALAR_ATTRIBUTE_OPTIONAL(double, DepthMm, deviceConfig);
+  //if (this->DepthMm < 0)
+  //{
+  //  this->DepthMm = DEFAULT_DEPTH_MM;
+  //}
 
   // gain (%)
 
@@ -519,8 +480,7 @@ PlusStatus vtkPlusClariusOEM::WriteConfiguration(vtkXMLDataElement* rootConfigEl
 
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_WRITING(deviceConfig, rootConfigElement);
 
-  // depth (cm)
-  deviceConfig->SetDoubleAttribute("DepthMm", this->DepthMm);
+  this->ImagingParameters->WriteConfiguration(deviceConfig);
 
   return PLUS_SUCCESS;
 }
@@ -1017,13 +977,34 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     LOG_ERROR("error calling load application");
   }
 
-  vtkIGSIOAccurateTimer::Delay(1.0);
+  vtkIGSIOAccurateTimer::Delay(2.0);
 
-  // set imaging parameters
-  double depth_cm = this->DepthMm / 10.0;
-  if (cusOemSetParam(PARAM_DEPTH, depth_cm) != 0)
+  // set imaging depth (mm)
+  double depthMm = this->ImagingParameters->GetDepthMm();
+  if (this->SetDepthMm(depthMm) != PLUS_SUCCESS)
   {
-    LOG_WARNING("Failed to set requested imaging depth in Clarius OEM device, undefined depth will be used");
+    LOG_WARNING("Failed to set requested imaging depth (mm) in Clarius OEM device, undefined depth will be used");
+  }
+
+  // set gain (%)
+  double gainPercent = this->ImagingParameters->GetGainPercent();
+  if (this->SetGainPercent(gainPercent) != PLUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to set requested imaging gain (%) in Clarius OEM device, undefined gain will be used");
+  }
+
+  // set dynamic range (%)
+  double dynRangePercent = this->ImagingParameters->GetDynRangeDb();
+  if (this->SetDynRangePercent(dynRangePercent) != PLUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to set requested imaging dynamic range in Clarius OEM device, undefined dynamic range will be used");
+  }
+
+  // set time gain compensation
+  std::vector<double> tgcPercent = this->ImagingParameters->GetTimeGainCompensation();
+  if (this->SetTimeGainCompensationPercent(tgcPercent) != PLUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to set requested imaging time gain compensation in Clarius OEM device, undefined time gain compensation will be used");
   }
 
   return PLUS_SUCCESS;
@@ -1149,5 +1130,273 @@ PlusStatus vtkPlusClariusOEM::InternalStopRecording()
     return PLUS_FAIL;
   }
 
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InternalApplyImagingParameterChange()
+{
+  PlusStatus status = PLUS_SUCCESS;
+
+  // depth (mm), note: Clarius uses cm
+  if (this->ImagingParameters->IsSet(vtkPlusUsImagingParameters::KEY_DEPTH)
+    && this->ImagingParameters->IsPending(vtkPlusUsImagingParameters::KEY_DEPTH))
+  {
+    if (this->SetDepthMm(this->ImagingParameters->GetDepthMm()) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to set depth imaging parameter");
+      status = PLUS_FAIL;
+    }
+  }
+
+  // gain (percent)
+  if (this->ImagingParameters->IsSet(vtkPlusUsImagingParameters::KEY_GAIN)
+    && this->ImagingParameters->IsPending(vtkPlusUsImagingParameters::KEY_GAIN))
+  {
+    if (this->SetGainPercent(this->ImagingParameters->GetGainPercent()) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to set gain imaging parameter");
+      status = PLUS_FAIL;
+    }
+  }
+
+  // dynamic range (percent)
+  if (this->ImagingParameters->IsSet(vtkPlusUsImagingParameters::KEY_DYNRANGE)
+    && this->ImagingParameters->IsPending(vtkPlusUsImagingParameters::KEY_DYNRANGE))
+  {
+    if (this->SetDynRangePercent(this->ImagingParameters->GetDynRangeDb()) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to set dynamic range imaging parameter");
+      status = PLUS_FAIL;
+    }
+  }
+
+  // TGC (time gain compensation)
+  if (this->ImagingParameters->IsSet(vtkPlusUsImagingParameters::KEY_TGC)
+    && this->ImagingParameters->IsPending(vtkPlusUsImagingParameters::KEY_TGC))
+  {
+    std::vector<double> tgcVec;
+    this->ImagingParameters->GetTimeGainCompensation(tgcVec);
+    if (this->SetTimeGainCompensationPercent(tgcVec) != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to set time gain compensation imaging parameter");
+      status = PLUS_FAIL;
+    }
+  }
+
+  return status;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::GetDepthMm(double& aDepthMm)
+{
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, return cached parameter value
+    return this->ImagingParameters->GetDepthMm(aDepthMm);
+  }
+
+  double oemVal = cusOemGetParam(PARAM_DEPTH);
+  if (oemVal < 0)
+  {
+    aDepthMm = -1;
+    LOG_ERROR("Failed to get DepthMm parameter");
+    return PLUS_FAIL;
+  }
+
+  aDepthMm = oemVal * CM_TO_MM;
+
+  // ensure ImagingParameters is up to date
+  this->ImagingParameters->SetDepthMm(aDepthMm);
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetDepthMm(double aDepthMm)
+{
+  LOG_INFO("Setting US parameter DepthMm");
+
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, parameter value will be set upon connection
+    this->ImagingParameters->SetDepthMm(aDepthMm);
+    return PLUS_SUCCESS;
+  }
+
+  // attempt to set parameter value
+  double depthCm = aDepthMm * MM_TO_CM;
+  if (cusOemSetParam(PARAM_DEPTH, depthCm) < 0)
+  {
+    LOG_ERROR("Failed to set DepthMm parameter");
+    return PLUS_FAIL;
+  }
+
+  // update imaging parameters & return successfully
+  this->ImagingParameters->SetDepthMm(aDepthMm);
+  LOG_INFO("Set US parameter DepthMm to " << aDepthMm);
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::GetGainPercent(double& aGainPercent)
+{
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, return cached parameter value
+    return this->ImagingParameters->GetGainPercent(aGainPercent);
+  }
+
+  double oemVal = cusOemGetParam(PARAM_GAIN);
+  if (oemVal < 0)
+  {
+    aGainPercent = -1;
+    LOG_ERROR("Failed to get GainPercent parameter");
+    return PLUS_FAIL;
+  }
+
+  aGainPercent = oemVal;
+
+  // ensure ImagingParameters is up to date
+  this->ImagingParameters->SetGainPercent(aGainPercent);
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetGainPercent(double aGainPercent)
+{
+  LOG_INFO("Setting US parameter GainPercent");
+
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, parameter value will be set upon connection
+    this->ImagingParameters->SetGainPercent(aGainPercent);
+    return PLUS_SUCCESS;
+  }
+
+  // attempt to set parameter value
+  if (cusOemSetParam(PARAM_GAIN, aGainPercent) < 0)
+  {
+    LOG_ERROR("Failed to set GainPercent parameter");
+    return PLUS_FAIL;
+  }
+
+  // update imaging parameters & return successfully
+  this->ImagingParameters->SetGainPercent(aGainPercent);
+  LOG_INFO("Set US parameter GainPercent to " << aGainPercent);
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::GetDynRangePercent(double& aDynRangePercent)
+{
+
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, return cached parameter value
+    return this->ImagingParameters->GetDynRangeDb(aDynRangePercent);
+  }
+
+  double oemVal = cusOemGetParam(PARAM_DYNRNG);
+  if (oemVal < 0)
+  {
+    aDynRangePercent = -1;
+    LOG_ERROR("Failed to get DynRange parameter");
+    return PLUS_FAIL;
+  }
+
+  aDynRangePercent = oemVal;
+
+  // ensure ImagingParameters is up to date
+  this->ImagingParameters->SetDynRangeDb(aDynRangePercent);
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetDynRangePercent(double aDynRangePercent)
+{
+  LOG_INFO("Setting US parameter DynRange");
+
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, parameter value will be set upon connection
+    this->ImagingParameters->SetDynRangeDb(aDynRangePercent);
+    return PLUS_SUCCESS;
+  }
+
+  // attempt to set parameter value
+  if (cusOemSetParam(PARAM_DYNRNG, aDynRangePercent) < 0)
+  {
+    LOG_ERROR("Failed to set DynRange parameter");
+    return PLUS_FAIL;
+  }
+
+  // update imaging parameters & return successfully
+  this->ImagingParameters->SetDynRangeDb(aDynRangePercent);
+  LOG_INFO("Set US parameter DynRangePercent to " << aDynRangePercent);
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::GetTimeGainCompensationPercent(std::vector<double>& aTGC)
+{
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, return cached parameter value
+    return this->ImagingParameters->GetTimeGainCompensation(aTGC);
+  }
+
+  ClariusTgc cTGC;
+  if (cusOemGetTgc(&cTGC) < 0)
+  {
+    LOG_ERROR("vtkPlusClariusOEM failed to get time gain compensation parameter");
+    return PLUS_FAIL;
+  }
+
+  aTGC.clear();
+  aTGC.resize(3);
+  aTGC[0] = cTGC.top;
+  aTGC[1] = cTGC.mid;
+  aTGC[2] = cTGC.bottom;
+
+  // ensure imaging parameters are up to date
+  this->ImagingParameters->SetTimeGainCompensation(aTGC);
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetTimeGainCompensationPercent(const std::vector<double>& aTGC)
+{
+  LOG_INFO("Setting US parameter time gain compensation to [" << aTGC[0] << ", " << aTGC[1]
+    << ", " << aTGC[2] << "]");
+  
+  if (aTGC.size() != 3)
+  {
+    LOG_ERROR("vtkPlusClariusOEM time gain compensation parameter must be provided a vector of exactly 3 doubles [top gain, mid gain, bottom gain]");
+    return PLUS_FAIL;
+  }
+
+  if (!this->Connected)
+  {
+    // Connection has not been established yet, parameter value will be set upon connection
+    this->ImagingParameters->SetTimeGainCompensation(aTGC);
+    return PLUS_SUCCESS;
+  }
+
+  ClariusTgc cTGC;
+  cTGC.top = aTGC[0];
+  cTGC.mid = aTGC[1];
+  cTGC.bottom = aTGC[2];
+  if (cusOemSetTgc(&cTGC) < 0)
+  {
+    LOG_ERROR("vtkPlusClariusOEM failed to set time gain compensation");
+    return PLUS_FAIL;
+  }
+
+  // update imaging parameters & return successfully
+  this->ImagingParameters->SetTimeGainCompensation(aTGC);
   return PLUS_SUCCESS;
 }

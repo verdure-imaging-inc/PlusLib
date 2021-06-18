@@ -14,6 +14,9 @@
 #include "vtkPlusDataCollectionExport.h"
 #include "vtkPlusUsDevice.h"
 
+// STL includes
+#include <vector>
+
 /*!
 \class vtkPlusClariusOEM
 \brief Interface to Clarius Ultrasound Devices
@@ -68,23 +71,6 @@ public:
   /*! return the singleton instance with no reference counting */
   static vtkPlusClariusOEM* GetInstance();
 
-  // US parameters API
-
-  /*! Get the imaging depth of B-mode ultrasound (mm) */
-  PlusStatus GetDepthMm(double& aDepthMm);
-  /*! Set the imaging depth of B-mode ultrasound (mm) */
-  PlusStatus SetDepthMm(double aDepthMm);
-
-  /*! Set the gain percentage of B-mode ultrasound (valid range: 0-100) */
-
-  /*! Get the gain percentage of B-mode ultrasound (valid range: 0-100) */
-
-  /*! Set the dynamic range of B-mode ultrasound (dB)*/
-  PlusStatus SetDynRangeDb(double aDynamicRange);
-  /*! Get the dynamic range of B-mode ultrasound (dB)*/
-  PlusStatus GetDynRangeDb(double& aDynamicRange);
-
-
 protected:
   vtkPlusClariusOEM();
   ~vtkPlusClariusOEM();
@@ -114,13 +100,35 @@ protected:
 
   PlusStatus InternalStopRecording() override;
 
+  PlusStatus InternalApplyImagingParameterChange() override;
+
+public:
+
+  // US parameters API
+
+  /*! Get the imaging depth of B-mode ultrasound (mm) */
+  PlusStatus GetDepthMm(double& aDepthMm);
+  /*! Set the imaging depth of B-mode ultrasound (mm) */
+  PlusStatus SetDepthMm(double aDepthMm);
+
+  /*! Get the gain percentage of B-mode ultrasound (%) */
+  PlusStatus GetGainPercent(double& aGainPercent);
+  /*! Set the gain percentage of B-mode ultrasound (%) */
+  PlusStatus SetGainPercent(double aGainPercent);
+
+  /*! Get the dynamic range of B-mode ultrasound (%)*/
+  PlusStatus GetDynRangePercent(double& aDynamicRangePercent);
+  /*! Set the dynamic range of B-mode ultrasound (%)*/
+  PlusStatus SetDynRangePercent(double aDynamicRangePercent);
+
+  /*! Get the time gain compensation in (%) */
+  PlusStatus GetTimeGainCompensationPercent(std::vector<double>& aTGC);
+  /*! Set the time gain compensation (%) */
+  PlusStatus SetTimeGainCompensationPercent(const std::vector<double>& aTGC);
+
+private:
+
   static vtkPlusClariusOEM* instance;
-
-  FrameSizeType FrameSize;
-
-  double DepthMm;
-  double GainPercent;
-  double DynamicRangePercent;
 
   class vtkInternal;
   vtkInternal* Internal;
