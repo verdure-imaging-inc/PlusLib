@@ -1284,6 +1284,7 @@ PlusStatus vtkPlusClariusOEM::InternalApplyImagingParameterChange()
       LOG_ERROR("Failed to set depth imaging parameter");
       status = PLUS_FAIL;
     }
+    this->ImagingParameters->SetPending(vtkPlusUsImagingParameters::KEY_DEPTH, false);
   }
 
   // gain (percent)
@@ -1295,6 +1296,7 @@ PlusStatus vtkPlusClariusOEM::InternalApplyImagingParameterChange()
       LOG_ERROR("Failed to set gain imaging parameter");
       status = PLUS_FAIL;
     }
+    this->ImagingParameters->SetPending(vtkPlusUsImagingParameters::KEY_GAIN, false);
   }
 
   // dynamic range (percent)
@@ -1306,6 +1308,7 @@ PlusStatus vtkPlusClariusOEM::InternalApplyImagingParameterChange()
       LOG_ERROR("Failed to set dynamic range imaging parameter");
       status = PLUS_FAIL;
     }
+    this->ImagingParameters->SetPending(vtkPlusUsImagingParameters::KEY_DYNRANGE, false);
   }
 
   // TGC (time gain compensation)
@@ -1319,6 +1322,7 @@ PlusStatus vtkPlusClariusOEM::InternalApplyImagingParameterChange()
       LOG_ERROR("Failed to set time gain compensation imaging parameter");
       status = PLUS_FAIL;
     }
+    this->ImagingParameters->SetPending(vtkPlusUsImagingParameters::KEY_TGC, false);
   }
 
   return status;
