@@ -39,6 +39,9 @@
 #include <oem.h>
 #include <oem_def.h>
 
+#define CLARIUS_TRUE 1
+#define CLARIUS_FALSE 0
+#define CLARIUS_SUCCESS 0
 
 namespace
 {
@@ -52,6 +55,8 @@ namespace
   static const bool DEFAULT_ENABLE_IMU = false;
 
   static const bool DEFAULT_ENABLE_BUTTONS = false;
+
+  static const bool DEFAULT_ENABLE_5V_RAIL = false;
 
   static const double DEFAULT_DEPTH_MM = 100.0;
 
@@ -130,6 +135,7 @@ protected:
   bool EnableAutoGain;
   bool EnableImu;
   bool EnableButtons;
+  bool Enable5vRail;
 
   // parameters retrieved from the probe over BLE
   std::string Ssid;
@@ -168,6 +174,7 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , EnableAutoGain(DEFAULT_ENABLE_AUTO_GAIN)
 , EnableImu(DEFAULT_ENABLE_IMU)
 , EnableButtons(DEFAULT_ENABLE_BUTTONS)
+, Enable5vRail(DEFAULT_ENABLE_5V_RAIL)
 , IpAddress("")
 , TcpPort(-1)
 , ValidProbesPopulated(false)
@@ -550,6 +557,10 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   // enable button presses
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(EnableButtons,
     this->Internal->EnableButtons, deviceConfig);
+
+  // enable 5v rail
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(Enable5v,
+    this->Internal->Enable5vRail, deviceConfig);
 
   // read imaging parameters
   this->ImagingParameters->ReadConfiguration(deviceConfig);
@@ -1116,6 +1127,13 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   vtkIGSIOAccurateTimer::Delay(2.0);
 
+  // optionally enable the 5v rail on the top of the Clarius probe
+  int enable5v = this->Internal->Enable5vRail ? 1 : 0;
+  if (cusOemEnable5v(enable5v) != CLARIUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to set the state of the Clarius probe 5v rail, provided enable value was: " << enable5v);
+  }
+
   // set imaging depth (mm)
   double depthMm = this->ImagingParameters->GetDepthMm();
   if (this->SetDepthMm(depthMm) != PLUS_SUCCESS)
@@ -1207,6 +1225,12 @@ PlusStatus vtkPlusClariusOEM::PowerOffClarius(vtkPlusClariusOEM* device)
 PlusStatus vtkPlusClariusOEM::InternalDisconnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
+
+  // disable the 5v rail before shutting down the probe
+  if (cusOemEnable5v(CLARIUS_FALSE) != CLARIUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to disable the Clarius probe 5v rail");
+  }
 
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device->Connected)
