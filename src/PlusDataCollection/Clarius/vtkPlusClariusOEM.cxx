@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <future>
 #include <map>
 #include <sstream>
 #include <string>
@@ -144,10 +145,8 @@ protected:
   int TcpPort;
 
   // parameters retrieved from the probe using the OEM API
-  std::vector<std::string> ValidProbes;
-  bool ValidProbesPopulated;
-  std::vector<std::string> ValidApplications;
-  bool ValidApplicationsPopulated;
+  std::promise<std::vector<std::string>> PromiseProbes;
+  std::promise<std::vector<std::string>> PromiseApplications;
 
   enum class EXPECTED_LIST
   {
@@ -177,8 +176,6 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
 , Enable5vRail(DEFAULT_ENABLE_5V_RAIL)
 , IpAddress("")
 , TcpPort(-1)
-, ValidProbesPopulated(false)
-, ValidApplicationsPopulated(false)
 {
 }
 
@@ -187,37 +184,23 @@ void vtkPlusClariusOEM::vtkInternal::ListFn(const char* list, int sz)
 {
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   
-  std::vector<std::string>* vec;
-  if (device->Internal->ExpectedList == EXPECTED_LIST::PROBES)
-  {
-    vec = &device->Internal->ValidProbes;
-  }
-  else if (device->Internal->ExpectedList == EXPECTED_LIST::APPLICATIONS)
-  {
-    vec = &device->Internal->ValidApplications;
-  }
-  else
-  {
-    LOG_ERROR("Unexpected list processed with values: " << list);
-    return;
-  }
+  std::vector<std::string> vec;
 
-  vec->clear();
   std::stringstream ss(list);
   while (ss.good())
   {
     std::string substr;
     getline(ss, substr, ',');
-    vec->push_back(substr);
+    vec.push_back(substr);
   }
 
   if (device->Internal->ExpectedList == EXPECTED_LIST::PROBES)
   {
-    device->Internal->ValidProbesPopulated = true;
+    device->Internal->PromiseProbes.set_value(vec);
   }
   else if (device->Internal->ExpectedList == EXPECTED_LIST::APPLICATIONS)
   {
-    device->Internal->ValidApplicationsPopulated = true;
+    device->Internal->PromiseApplications.set_value(vec);
   }
 }
 
@@ -389,7 +372,7 @@ void vtkPlusClariusOEM::vtkInternal::ProgressFn(int progress)
  * */
 void vtkPlusClariusOEM::vtkInternal::ErrorFn(const char* err)
 {
-  LOG_INFO("error: " << err);
+  LOG_ERROR("error: " << err);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1062,21 +1045,26 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   if (cusOemStatusInfo(&stats) == 0)
     LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
 
-  // list available probes
+  // get list of available probes
   ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
   this->Internal->ExpectedList = vtkPlusClariusOEM::vtkInternal::EXPECTED_LIST::PROBES;
+  std::future<std::vector<std::string>> futureProbes = this->Internal->PromiseProbes.get_future();
   if (cusOemProbes(listFnPtr) != 0)
   {
     LOG_INFO("Failed to retrieve list of valid probe types");
     return PLUS_FAIL;
   }
 
-  // busy wait for probes list to populate
-  while (!this->Internal->ValidProbesPopulated) {}
+  // wait for probes list to be populated
+  if (futureProbes.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+  {
+    LOG_ERROR("Failed to retrieve list of valid Clarius probe names");
+    return PLUS_FAIL;
+  }
+  std::vector<std::string> vProbes = futureProbes.get();
 
   // validate provided probe type
   std::string probeType = this->Internal->ProbeType;
-  std::vector<std::string> vProbes = this->Internal->ValidProbes;
   if (std::find(vProbes.begin(), vProbes.end(), probeType) == vProbes.end())
   {
     std::string vProbesStr;
@@ -1091,18 +1079,23 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 
   // list available imaging applications
   this->Internal->ExpectedList = vtkPlusClariusOEM::vtkInternal::EXPECTED_LIST::APPLICATIONS;
+  std::future<std::vector<std::string>> futureApplications = this->Internal->PromiseApplications.get_future();
   if (cusOemApplications(probeType.c_str(), listFnPtr) != 0)
   {
     LOG_ERROR("Failed to retrieve list of valid imaging applications");
     return PLUS_FAIL;
   }
 
-  // busy wait for applications list to populate
-  while (!this->Internal->ValidApplicationsPopulated) {}
+  // wait for applications list to be populated
+  if (futureApplications.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+  {
+    LOG_ERROR("Failed to retrieve list of valid Clarius application names");
+    return PLUS_FAIL;
+  }
+  std::vector<std::string> vApps = futureApplications.get();
 
   // validate provided imaging application
   std::string imagingApplication = this->Internal->ImagingApplication;
-  std::vector<std::string> vApps = this->Internal->ValidApplications;
   if (std::find(vApps.begin(), vApps.end(), imagingApplication) == vApps.end())
   {
     std::string vAppsStr;
