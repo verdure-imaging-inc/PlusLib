@@ -916,21 +916,30 @@ IF(PLUS_USE_CLARIUS_OEM)
   LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/Clarius
     )
+ 
+  SET(PLUSLIB_QT_COMPONENTS ${PLUSLIB_QT_COMPONENTS} Bluetooth CACHE INTERNAL "" FORCE)
+  FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Bluetooth)
+  LIST(APPEND ${PROJECT_NAME}_LIBS
+    Qt5::Bluetooth
+    )
 
   LIST(APPEND ${PROJECT_NAME}_PRIVATE_LIBS
     ClariusOEM
     CBTLib
     )
 
-  # copy the ClariusOEM dll to /bin/* directories
+  GET_TARGET_PROPERTY(Qt5BtDll Qt5::Bluetooth IMPORTED_LOCATION_RELEASE)
+
   LIST(APPEND External_Libraries_Debug
     ${CBTLib_BINARY_DEBUG}
+    ${Qt5BtDll}
   )
 
   LIST(APPEND External_Libraries_Install
     ${ClariusOEM_BINARY_PATH}
     ${CBTLib_BINARY_RELEASE}
     ${CBTHelper_BINARY}
+    ${Qt5BtDll}
   )
 
 ENDIF()
