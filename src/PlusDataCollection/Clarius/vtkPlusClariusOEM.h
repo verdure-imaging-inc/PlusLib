@@ -75,24 +75,31 @@ protected:
   vtkPlusClariusOEM();
   ~vtkPlusClariusOEM();
 
-private:
-
-  PlusStatus PowerOnClarius(vtkPlusClariusOEM* device);
-
-  PlusStatus PowerOffClarius(vtkPlusClariusOEM* device);
-
-  PlusStatus ConnectToClariusWifi(vtkPlusClariusOEM* device);
-
-  PlusStatus DisconnectFromClariusWifi(vtkPlusClariusOEM* device);
-    
-  PlusStatus InitializeClariusOem(vtkPlusClariusOEM* device);
-
-  PlusStatus SetClariusCert(vtkPlusClariusOEM* device);
-
-  PlusStatus ConnectToClarius(vtkPlusClariusOEM* device);
-
 protected:
+
+  PlusStatus InitializeBLE();
+
+  PlusStatus InitializeProbe();
+
+  PlusStatus InitializeWifi();
+
+  PlusStatus InitializeOEM();
+
+  PlusStatus SetClariusCert();
+
+  PlusStatus ConfigureProbeApplication();
+
+  PlusStatus SetInitialUsParams();
+
   PlusStatus InternalConnect() override;
+
+  PlusStatus DeInitializeOEM();
+
+  PlusStatus DeInitializeWifi();
+
+  PlusStatus DeInitializeProbe();
+
+  PlusStatus DeInitializeBLE();
 
   PlusStatus InternalDisconnect() override;
 

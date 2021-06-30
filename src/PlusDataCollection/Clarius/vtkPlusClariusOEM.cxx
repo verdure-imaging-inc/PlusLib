@@ -624,8 +624,9 @@ std::string vtkPlusClariusOEM::GetSdkVersion()
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::InitializeBLE()
 {
+  // construct and initialize CBTInterface
   if (!this->Internal->BluetoothInterface)
   {
     this->Internal->BluetoothInterface = new CBTInterface();
@@ -641,13 +642,14 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
     return PLUS_FAIL;
   }
 
+  // check at least one probe found
   if (probes.size() == 0)
   {
     LOG_ERROR("No Clarius probes found... Please check probe has battery, and is connected to Windows bluetooth");
     return PLUS_FAIL;
   }
 
-  // is desired probe available
+  // check desired probe is available
   bool isProbeAvailable = false;
   for (std::string probe : probes)
   {
@@ -656,26 +658,23 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
       isProbeAvailable = true;
     }
   }
-
   if (!isProbeAvailable)
   {
     LOG_ERROR("Desired Clarius probe with SN: " << this->Internal->ProbeSerialNum << " was not found");
     return PLUS_FAIL;
   }
 
+  // attempt to connect to probe ble network
   bool connectionResult = false;
   int tries = 0;
-  while (tries < 100)
+  while (tries < 10)
   {
     if (!this->Internal->BluetoothInterface->ConnectToProbeBT(this->Internal->ProbeSerialNum, connectionResult))
     {
-      // LOG_ERROR("An error occurred during ConnectToProbeBT. Error text: "
-      //  << this->Internal->BluetoothInterface->GetLastErrorMessage());
       LOG_WARNING("Failed to connect to Clarius probe on try: " << (tries + 1));
       tries++;
       continue;
     }
-
     if (!connectionResult)
     {
       LOG_WARNING("Failed to connect to Clarius probe on try: " << (tries + 1));
@@ -694,8 +693,7 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
     return PLUS_FAIL;
   }
 
-
-  // TODO: check the probe is connected
+  // verify probe is connected
   bool isConnected;
   if (!this->Internal->BluetoothInterface->IsProbeConnected(isConnected))
   {
@@ -703,13 +701,19 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
       << this->Internal->BluetoothInterface->GetLastErrorMessage());
     return PLUS_FAIL;
   }
-
   if (!isConnected)
   {
-    LOG_ERROR("Somehow checking IsProbeConnected returns FALSE, when probe connection succeeded");
+    LOG_ERROR("IsProbeConnected returned FALSE, but probe connection indicated success, aborting from unexpected state");
     return PLUS_FAIL;
   }
 
+  // BLE connection succeeded
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InitializeProbe()
+{
   // power on the probe
   bool powerState;
   if (!this->Internal->BluetoothInterface->PowerProbe(true, powerState))
@@ -779,17 +783,17 @@ PlusStatus vtkPlusClariusOEM::PowerOnClarius(vtkPlusClariusOEM* device)
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::ConnectToClariusWifi(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::InitializeWifi()
 {
-  if (device->Internal->WifiHelper.Initialize() != PLUS_SUCCESS)
+  if (this->Internal->WifiHelper.Initialize() != PLUS_SUCCESS)
   {
     LOG_ERROR("Failed to initialize Clarius wifi helper");
     return PLUS_FAIL;
   }
 
-  PlusStatus res = device->Internal->WifiHelper.ConnectToClariusWifi(
-    device->Internal->Ssid,
-    device->Internal->Password
+  PlusStatus res = this->Internal->WifiHelper.ConnectToClariusWifi(
+    this->Internal->Ssid,
+    this->Internal->Password
   );
   if (res != PLUS_SUCCESS)
   {
@@ -801,25 +805,7 @@ PlusStatus vtkPlusClariusOEM::ConnectToClariusWifi(vtkPlusClariusOEM* device)
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::DisconnectFromClariusWifi(vtkPlusClariusOEM* device)
-{
-  if (device->Internal->WifiHelper.DisconnectFromClariusWifi() != PLUS_SUCCESS)
-  {
-    LOG_ERROR("Failed to disconnect from Clarius probe wifi");
-    return PLUS_FAIL;
-  }
-
-  if (device->Internal->WifiHelper.DeInitialize() != PLUS_SUCCESS)
-  {
-    LOG_ERROR("Failed to de-initialize Clarius wifi helper");
-    return PLUS_FAIL;
-  }
-
-  return PLUS_SUCCESS;
-}
-
-//-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::InitializeOEM()
 {
   // placeholder argc / argv arguments
   int argc = 1;
@@ -844,7 +830,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
 
   // no b-mode data sources, disable b mode callback
   std::vector<vtkPlusDataSource*> bModeSources;
-  device->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
+  this->GetVideoSourcesByPortName(vtkPlusDevice::BMODE_PORT_NAME, bModeSources);
   if (bModeSources.empty())
   {
     newProcessedImageFnPtr = nullptr;
@@ -852,7 +838,7 @@ PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
 
   // no RF-mode data sources, disable RF-mode callback
   std::vector<vtkPlusDataSource*> rfModeSources;
-  device->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
+  this->GetVideoSourcesByPortName(vtkPlusDevice::RFMODE_PORT_NAME, rfModeSources);
   if (rfModeSources.empty())
   {
     newRawImageFnPtr = nullptr;
@@ -904,10 +890,11 @@ PlusStatus vtkPlusClariusOEM::InitializeClariusOem(vtkPlusClariusOEM* device)
   }
 
   return PLUS_SUCCESS;
+
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::SetClariusCert(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::SetClariusCert()
 {
   // load the cert file
   std::string fullCertPath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(this->Internal->PathToCert);
@@ -932,10 +919,10 @@ PlusStatus vtkPlusClariusOEM::SetClariusCert(vtkPlusClariusOEM* device)
 }
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
 {
-  const char* ip = device->Internal->IpAddress.c_str();
-  unsigned int port = device->Internal->TcpPort;
+  const char* ip = this->Internal->IpAddress.c_str();
+  unsigned int port = this->Internal->TcpPort;
   LOG_INFO("Attempting connection to Clarius ultrasound on " << ip << ":" << port << " for 10 seconds:");
 
   try
@@ -943,7 +930,7 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
     int result = cusOemConnect(ip, port);
     if (result != CONNECT_SUCCESS)
     {
-      LOG_ERROR("Failed to initiate connection to Clarius probe on " << ip << ":" << port << 
+      LOG_ERROR("Failed to initiate connection to Clarius probe on " << ip << ":" << port <<
         ". Return code: " << ConnectEnumToString[result]);
       return PLUS_FAIL;
     }
@@ -979,71 +966,6 @@ PlusStatus vtkPlusClariusOEM::ConnectToClarius(vtkPlusClariusOEM* device)
   }
 
   LOG_INFO("Connected to Clarius probe on " << ip << ":" << port);
-  return PLUS_SUCCESS;
-}
-
-//-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::InternalConnect()
-{
-  LOG_TRACE("vtkPlusClariusOEM::InternalConnect");
-
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-
-  if (!this->Connected)
-  {
-    // power on the probe & get ssid, password & tcp params
-    if (this->PowerOnClarius(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to power on Clarius probe");
-      return PLUS_FAIL;
-    }
-
-    // connect to probe wifi
-    if (this->ConnectToClariusWifi(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to connect to Clarius wifi network");
-      this->PowerOffClarius(device);
-      return PLUS_FAIL;
-    }
-    
-    // initialize Clarius OEM library
-    if (this->InitializeClariusOem(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to initalize Clarius.");
-      cusOemDestroy();
-      this->PowerOffClarius(device);
-      return PLUS_FAIL;
-    }
-
-    // set Clarius certificate
-    if (this->SetClariusCert(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to.");
-      this->PowerOffClarius(device);
-      cusOemDestroy();
-      return PLUS_FAIL;
-    }
-
-    // connect to Clarius probe
-    if (this->ConnectToClarius(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to connect to Clarius probe.");
-      this->PowerOffClarius(device);
-      cusOemDestroy();
-      return PLUS_FAIL;
-    }
-  }
-  else
-  {
-    LOG_WARNING("Scanner already connected");
-  }
-
-  vtkIGSIOAccurateTimer::Delay(1.0);
-
-  // print device stats
-  ClariusStatusInfo stats;
-  if (cusOemStatusInfo(&stats) == 0)
-    LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
 
   // get list of available probes
   ClariusListFn listFnPtr = static_cast<ClariusListFn>(&vtkPlusClariusOEM::vtkInternal::ListFn);
@@ -1104,7 +1026,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
       vAppsStr += app + ", ";
     }
     vAppsStr.pop_back(); vAppsStr.pop_back(); // remove trailing comma and space
-    LOG_ERROR("Invalid imaging application (" << imagingApplication<< ") provided, valid imaging applications are: " << vAppsStr);
+    LOG_ERROR("Invalid imaging application (" << imagingApplication << ") provided, valid imaging applications are: " << vAppsStr);
     return PLUS_FAIL;
   }
 
@@ -1118,15 +1040,12 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     LOG_ERROR("An error occured on call to cusOemLoadApplication");
   }
 
-  vtkIGSIOAccurateTimer::Delay(2.0);
+  return PLUS_SUCCESS;
+}
 
-  // optionally enable the 5v rail on the top of the Clarius probe
-  int enable5v = this->Internal->Enable5vRail ? 1 : 0;
-  if (cusOemEnable5v(enable5v) != CLARIUS_SUCCESS)
-  {
-    LOG_WARNING("Failed to set the state of the Clarius probe 5v rail, provided enable value was: " << enable5v);
-  }
-
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::SetInitialUsParams()
+{
   // set imaging depth (mm)
   double depthMm = this->ImagingParameters->GetDepthMm();
   if (this->SetDepthMm(depthMm) != PLUS_SUCCESS)
@@ -1156,10 +1075,118 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   }
 
   return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::InternalConnect()
+{
+  LOG_TRACE("vtkPlusClariusOEM::InternalConnect");
+
+  if (this->Connected)
+  {
+    // Internal connect already called and completed successfully
+    return PLUS_SUCCESS;
+  }
+
+  if (this->InitializeBLE() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to initialize BLE in Clarius OEM device");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  if (this->InitializeProbe() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to initialize probe (power, wifi settings) in Clarius OEM device");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  if (this->InitializeWifi() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to initialize wifi in Clarius OEM device");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  if (this->InitializeOEM() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to initialize OEM library in Clarius OEM device");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  if (this->SetClariusCert() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  if (this->ConfigureProbeApplication() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to configure Clarius probe application");
+    this->InternalDisconnect();
+    return PLUS_FAIL;
+  }
+
+  // vtkIGSIOAccurateTimer::Delay(1.0);
+
+  // print device stats
+  ClariusStatusInfo stats;
+  if (cusOemStatusInfo(&stats) == 0)
+  {
+    LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
+  }
+
+
+
+  // enable the 5v rail on the top of the Clarius probe
+  int enable5v = this->Internal->Enable5vRail ? 1 : 0;
+  if (cusOemEnable5v(enable5v) != CLARIUS_SUCCESS)
+  {
+    LOG_WARNING("Failed to set the state of the Clarius probe 5v rail, provided enable value was: " << enable5v);
+  }
+
+  return PLUS_SUCCESS;
 };
 
 //-------------------------------------------------------------------------------------------------
-PlusStatus vtkPlusClariusOEM::PowerOffClarius(vtkPlusClariusOEM* device)
+PlusStatus vtkPlusClariusOEM::DeInitializeOEM()
+{
+  if (cusOemDisconnect() < 0)
+  {
+    LOG_ERROR("could not disconnect from scanner");
+    return PLUS_FAIL;
+  }
+  else
+  {
+    this->Connected = 0;
+    LOG_DEBUG("Clarius device is now disconnected");
+    return PLUS_SUCCESS;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::DeInitializeWifi()
+{
+  if (this->Internal->WifiHelper.DisconnectFromClariusWifi() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to disconnect from Clarius probe wifi");
+    return PLUS_FAIL;
+  }
+
+  if (this->Internal->WifiHelper.DeInitialize() != PLUS_SUCCESS)
+  {
+    LOG_ERROR("Failed to de-initialize Clarius wifi helper");
+    return PLUS_FAIL;
+  }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::DeInitializeProbe()
 {
   // power off the probe
   bool powerState;
@@ -1175,6 +1202,13 @@ PlusStatus vtkPlusClariusOEM::PowerOffClarius(vtkPlusClariusOEM* device)
     LOG_ERROR("Failed to power off Clarius probe");
     return PLUS_FAIL;
   }
+
+  return PLUS_SUCCESS;
+}
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::DeInitializeBLE()
+{
 
   // disconnect from probe
   bool disconnectionResult;
@@ -1225,38 +1259,7 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
     LOG_WARNING("Failed to disable the Clarius probe 5v rail");
   }
 
-  vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-  if (device->Connected)
-  {
-    if (cusOemDisconnect() < 0)
-    {
-      LOG_ERROR("could not disconnect from scanner");
-      return PLUS_FAIL;
-    }
-    else
-    {
-      device->Connected = 0;
-      LOG_DEBUG("Clarius device is now disconnected");
-      return PLUS_SUCCESS;
-    }
-
-    if (device->DisconnectFromClariusWifi(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to disconnect from Clarius probe wifi network");
-      return PLUS_FAIL;
-    }
-
-    if (device->PowerOffClarius(device) != PLUS_SUCCESS)
-    {
-      LOG_ERROR("Failed to power off Clarius probe");
-      return PLUS_FAIL;
-    }
-  }
-  else
-  {
-    LOG_DEBUG("...Clarius device already disconnected");
-    return PLUS_SUCCESS;
-  }
+  return PLUS_SUCCESS;
 };
 
 //-------------------------------------------------------------------------------------------------
