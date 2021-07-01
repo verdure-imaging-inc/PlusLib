@@ -43,17 +43,10 @@ public:
 
   bool IsVirtual() const override { return false; };
 
-private:
-
-  // configuration helper methods
-
-  PlusStatus ParseConnectionConfig(vtkXMLDataElement* deviceConfig);
-
-  PlusStatus ParseGainConfig(vtkXMLDataElement* deviceConfig);
+public:
 
   PlusStatus ParseImuConfig(vtkXMLDataElement* deviceConfig);
 
-public:
   /*! Read configuration from xml data */
   PlusStatus ReadConfiguration(vtkXMLDataElement* config) override;
 
@@ -93,13 +86,13 @@ protected:
 
   PlusStatus InternalConnect() override;
 
-  PlusStatus DeInitializeOEM();
+  void DeInitializeOEM();
 
-  PlusStatus DeInitializeWifi();
+  void DeInitializeWifi();
 
-  PlusStatus DeInitializeProbe();
+  void DeInitializeProbe();
 
-  PlusStatus DeInitializeBLE();
+  void DeInitializeBLE();
 
   PlusStatus InternalDisconnect() override;
 
