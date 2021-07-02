@@ -53,6 +53,9 @@ namespace
   static const double CM_TO_MM = 10.0;
   static const double MM_TO_CM = 0.1;
 
+  static const int CLARIUS_SHORT_DELAY_MS = 10;
+  static const int CLARIUS_LONG_DELAY_MS = 1000;
+
   static const FrameSizeType DEFAULT_FRAME_SIZE = { 512, 512, 1 };
 
   static const bool DEFAULT_ENABLE_AUTO_GAIN = false;
@@ -857,6 +860,7 @@ PlusStatus vtkPlusClariusOEM::InitializeOEM()
       fs[0],
       fs[1]
     );
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
     if (result < 0)
     {
@@ -906,6 +910,7 @@ PlusStatus vtkPlusClariusOEM::SetClariusCert()
     LOG_ERROR("Failed to set Clarius OEM connection certificate");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   return PLUS_SUCCESS;
 }
@@ -926,6 +931,7 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
         ". Return code: " << ConnectEnumToString[result]);
       return PLUS_FAIL;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
   }
   catch (const std::runtime_error& re)
   {
@@ -1031,6 +1037,7 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
   {
     LOG_ERROR("An error occured on call to cusOemLoadApplication");
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   return PLUS_SUCCESS;
 }
@@ -1119,7 +1126,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     this->InternalDisconnect();
     return PLUS_FAIL;
   }
-  
+
   // CONFIGURE PROBE MODE
   if (this->ConfigureProbeApplication() != PLUS_SUCCESS)
   {
@@ -1128,16 +1135,13 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     return PLUS_FAIL;
   }
 
-  std::this_thread::sleep_for(std::chrono::seconds(1));
-
   // print device stats
   ClariusStatusInfo stats;
   if (cusOemStatusInfo(&stats) == 0)
   {
     LOG_INFO("battery: " << stats.battery << "%, temperature: " << stats.temperature << "%");
   }
-
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   // enable the 5v rail on the top of the Clarius probe
   int enable5v = this->Internal->Enable5vRail ? 1 : 0;
@@ -1146,8 +1150,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     std::string enstr = (enable5v ? "TRUE" : "FALSE");
     LOG_WARNING("Failed to set the state of the Clarius probe 5v rail, provided enable value was: " << enstr);
   }
-
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   // set imaging parameters
   this->SetInitialUsParams();
@@ -1227,29 +1230,30 @@ void vtkPlusClariusOEM::DeInitializeProbe()
 void vtkPlusClariusOEM::DeInitializeBLE()
 {
   // disconnect from probe
-  bool disconnectionResult;
-  if (!this->Internal->BluetoothInterface->DisconnectFromProbeBT(disconnectionResult))
-  {
-    LOG_WARNING("An error occurred during DisconnectFromProbeBT, error text was: "
-      << this->Internal->BluetoothInterface->GetLastErrorMessage());
-  }
+  // TODO: fix the exception this causes
+  // bool disconnectionResult;
+  // if (!this->Internal->BluetoothInterface->DisconnectFromProbeBT(disconnectionResult))
+  // {
+  //   LOG_WARNING("An error occurred during DisconnectFromProbeBT, error text was: "
+  //     << this->Internal->BluetoothInterface->GetLastErrorMessage());
+  // }
 
-  if (!disconnectionResult)
-  {
-    LOG_WARNING("Failed to disconnect from Clarius probe");
-  }
+  // if (!disconnectionResult)
+  // {
+  //   LOG_WARNING("Failed to disconnect from Clarius probe");
+  // }
 
-  // de-initialize interface
-  if (!this->Internal->BluetoothInterface->DeInitialize())
-  {
-    LOG_WARNING("Failed to de-initialize BluetoothInterface");
-  }
+  // // de-initialize interface
+  // if (!this->Internal->BluetoothInterface->DeInitialize())
+  // {
+  //   LOG_WARNING("Failed to de-initialize BluetoothInterface");
+  // }
 
-  if (this->Internal->BluetoothInterface)
-  {
-    delete this->Internal->BluetoothInterface;
-    this->Internal->BluetoothInterface = nullptr;
-  }
+  // if (this->Internal->BluetoothInterface)
+  // {
+  //   delete this->Internal->BluetoothInterface;
+  //   this->Internal->BluetoothInterface = nullptr;
+  // }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1276,6 +1280,7 @@ PlusStatus vtkPlusClariusOEM::InternalStartRecording()
     LOG_ERROR("Failed to start Clarius imaging");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   return PLUS_SUCCESS;
 }
@@ -1290,6 +1295,7 @@ PlusStatus vtkPlusClariusOEM::InternalStopRecording()
     LOG_ERROR("Failed to stop Clarius imaging");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   return PLUS_SUCCESS;
 }
@@ -1368,6 +1374,7 @@ PlusStatus vtkPlusClariusOEM::GetDepthMm(double& aDepthMm)
     LOG_ERROR("Failed to get DepthMm parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   aDepthMm = oemVal * CM_TO_MM;
 
@@ -1395,6 +1402,7 @@ PlusStatus vtkPlusClariusOEM::SetDepthMm(double aDepthMm)
     LOG_ERROR("Failed to set DepthMm parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   // update imaging parameters & return successfully
   this->ImagingParameters->SetDepthMm(aDepthMm);
@@ -1418,6 +1426,7 @@ PlusStatus vtkPlusClariusOEM::GetGainPercent(double& aGainPercent)
     LOG_ERROR("Failed to get GainPercent parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   aGainPercent = oemVal;
 
@@ -1444,6 +1453,7 @@ PlusStatus vtkPlusClariusOEM::SetGainPercent(double aGainPercent)
     LOG_ERROR("Failed to set GainPercent parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   // update imaging parameters & return successfully
   this->ImagingParameters->SetGainPercent(aGainPercent);
@@ -1467,6 +1477,7 @@ PlusStatus vtkPlusClariusOEM::GetDynRangePercent(double& aDynRangePercent)
     LOG_ERROR("Failed to get DynRange parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   aDynRangePercent = oemVal;
 
@@ -1493,6 +1504,7 @@ PlusStatus vtkPlusClariusOEM::SetDynRangePercent(double aDynRangePercent)
     LOG_ERROR("Failed to set DynRange parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   // update imaging parameters & return successfully
   this->ImagingParameters->SetDynRangeDb(aDynRangePercent);
@@ -1515,6 +1527,7 @@ PlusStatus vtkPlusClariusOEM::GetTimeGainCompensationPercent(std::vector<double>
     LOG_ERROR("Failed to get time gain compensation parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   aTGC.clear();
   aTGC.resize(3);
@@ -1554,6 +1567,7 @@ PlusStatus vtkPlusClariusOEM::SetTimeGainCompensationPercent(const std::vector<d
     LOG_ERROR("Failed to set time gain compensation parameter");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_SHORT_DELAY_MS));
 
   // update imaging parameters & return successfully
   this->ImagingParameters->SetTimeGainCompensation(aTGC);
