@@ -54,7 +54,7 @@ namespace
   static const double MM_TO_CM = 0.1;
 
   static const int CLARIUS_SHORT_DELAY_MS = 10;
-  static const int CLARIUS_LONG_DELAY_MS = 1000;
+  static const int CLARIUS_LONG_DELAY_MS = 2000;
 
   static const FrameSizeType DEFAULT_FRAME_SIZE = { 512, 512, 1 };
 
@@ -974,6 +974,7 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
     LOG_INFO("Failed to retrieve list of valid probe types");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   // wait for probes list to be populated
   if (futureProbes.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
@@ -1005,6 +1006,7 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
     LOG_ERROR("Failed to retrieve list of valid imaging applications");
     return PLUS_FAIL;
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
 
   // wait for applications list to be populated
   if (futureApplications.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
