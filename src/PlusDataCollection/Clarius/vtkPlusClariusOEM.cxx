@@ -151,6 +151,7 @@ protected:
   // parameters retrieved from the probe using the OEM API
   std::promise<std::vector<std::string>> PromiseProbes;
   std::promise<std::vector<std::string>> PromiseApplications;
+  std::promise<void> ConnectionBarrier;
 
   enum class EXPECTED_LIST
   {
@@ -219,7 +220,7 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(int ret, int port, const char* st
   {
     // connection succeeded, set Internal->Connected variable to end busy wait in InternalConnect
     vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
-    device->Connected = true;
+    device->Internal->ConnectionBarrier.set_value();
   }
 }
 
@@ -921,7 +922,8 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
   const char* ip = this->Internal->IpAddress.c_str();
   unsigned int port = this->Internal->TcpPort;
   LOG_INFO("Attempting connection to Clarius ultrasound on " << ip << ":" << port << " for 10 seconds:");
-
+  
+  std::future<void> connectionBarrierFuture = this->Internal->ConnectionBarrier.get_future();
   try
   {
     int result = cusOemConnect(ip, port);
@@ -931,7 +933,6 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
         ". Return code: " << ConnectEnumToString[result]);
       return PLUS_FAIL;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
   }
   catch (const std::runtime_error& re)
   {
@@ -949,20 +950,12 @@ PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
     return PLUS_FAIL;
   }
 
-  // get start timestamp
-  std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
-
-  while (!this->Connected)
+  // wait for cusOemConnected call to complete
+  if (connectionBarrierFuture.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
   {
-    std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
-    std::chrono::duration<double> dur = t - startTime;
-    if (dur.count() > 10)
-    {
-      LOG_ERROR("Connection to Clarius device timed out.");
-      return PLUS_FAIL;
-    }
+    LOG_ERROR("Connection to Clarius device timed out");
+    return PLUS_FAIL;
   }
-
   LOG_INFO("Connected to Clarius probe on " << ip << ":" << port);
 
   // get list of available probes
