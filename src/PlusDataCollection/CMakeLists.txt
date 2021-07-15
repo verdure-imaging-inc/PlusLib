@@ -282,9 +282,9 @@ IF(PLUS_USE_OPTITRACK)
         ${OPTITRACK_MOTIVE_DIR}/${LIBRARIES_PATH_SUFFIX}Qt5Multimedia${CMAKE_SHARED_LIBRARY_SUFFIX}
         )
 
-      LIST(APPEND OPTITRACK_MOTIVE_API_PLATFORM_SHARED_LIBS
-        ${OPTITRACK_MOTIVE_DIR}/plugins/platforms/qwindows${CMAKE_SHARED_LIBRARY_SUFFIX}
-        )
+      #LIST(APPEND OPTITRACK_MOTIVE_API_PLATFORM_SHARED_LIBS
+      #  ${OPTITRACK_MOTIVE_DIR}/plugins/platforms/qwindows${CMAKE_SHARED_LIBRARY_SUFFIX}
+      #  )
 
       FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Multimedia)
       SET(PLUSLIB_QT_COMPONENTS ${PLUSLIB_QT_COMPONENTS} Multimedia CACHE INTERNAL "" FORCE)
@@ -930,10 +930,10 @@ IF(PLUS_USE_CLARIUS_OEM)
 
   GET_TARGET_PROPERTY(Qt5BtDll Qt5::Bluetooth IMPORTED_LOCATION_RELEASE)
 
-  LIST(APPEND External_Libraries_Debug
-    ${CBTLib_BINARY_DEBUG}
-    ${Qt5BtDll}
-  )
+  #LIST(APPEND External_Libraries_Debug
+  #  ${CBTLib_BINARY_DEBUG}
+  #  ${Qt5BtDll}
+  #)
 
   LIST(APPEND External_Libraries_Install
     ${ClariusOEM_BINARY_PATH}
@@ -2753,14 +2753,14 @@ INSTALL(FILES ${External_Libraries_Static_Install}
   DESTINATION "${PLUSLIB_LIBRARY_INSTALL}" COMPONENT RuntimeLibraries
   )
 
-IF(PLUS_USE_OPTITRACK AND OPTITRACK_MOTIVE_VERSION VERSION_GREATER_EQUAL "2.1.1")
-  # Copy additional OptiTrack libraries
-  ADD_CUSTOM_COMMAND( TARGET vtk${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    ${OPTITRACK_MOTIVE_DIR}/platforms/qwindows.dll
-    $<TARGET_FILE_DIR:vtk${PROJECT_NAME}>/platforms/qwindows.dll
-    )
-ENDIF()
+#IF(PLUS_USE_OPTITRACK AND OPTITRACK_MOTIVE_VERSION VERSION_GREATER_EQUAL "2.1.1")
+#  # Copy additional OptiTrack libraries
+#  ADD_CUSTOM_COMMAND( TARGET vtk${PROJECT_NAME} POST_BUILD
+#    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#    ${OPTITRACK_MOTIVE_DIR}/platforms/qwindows.dll
+#    $<TARGET_FILE_DIR:vtk${PROJECT_NAME}>/platforms/qwindows.dll
+#    )
+#ENDIF()
 
 # --------------------------------------------------------------------------
 # Testing
