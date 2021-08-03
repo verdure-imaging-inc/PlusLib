@@ -257,16 +257,14 @@ void vtkPlusClariusOEM::vtkInternal::SpectralImageFn(const void* newImage, const
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, const ClariusProcessedImageInfo* nfo, int npos, const ClariusPosInfo* pos)
 {
+  auto ts = std::chrono::high_resolution_clock::now();
+
   vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
   if (device == NULL)
   {
     LOG_ERROR("Clarius instance is NULL!!!");
     return;
   }
-
-
-  LOG_TRACE("new image (" << newImage << "): " << nfo->width << " x " << nfo->height << " @ " << nfo->bitsPerPixel
-    << "bits. @ " << nfo->micronsPerPixel << " microns per pixel. imu points: " << npos);
 
   // Check if still connected
   if (device->Connected == 0)
@@ -335,6 +333,10 @@ void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* newImage, cons
     &customField
   );
 
+  auto tf = std::chrono::high_resolution_clock::now();
+
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(tf - ts);
+  LOG_INFO("ProcImFn elapsed: " << us.count());
   device->FrameNumber++;
 }
 
@@ -1129,6 +1131,11 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     this->InternalDisconnect();
     return PLUS_FAIL;
   }
+
+  // at this point the probe is connected, we set this->Connected here
+  // to allow the call to this->SetInitialUsParams() at the end of 
+  // internal connect to actually set the params (rather than caching them)
+  this->Connected = true;
 
   // print device stats
   ClariusStatusInfo stats;
