@@ -15,55 +15,8 @@ See License.txt for details.
 #include <vtkXMLDataElement.h>
 #include <vtksys/Encoding.hxx>
 
-// Motive API includes
-#include <NatNetClient.h>
-#include <NatNetTypes.h>
-#if MOTIVE_VERSION_MAJOR < 3
-#include <NPTrackingTools.h>
-#else
-#include <MotiveAPI.h>
-#endif
-
-#if MOTIVE_VERSION_MAJOR < 3
-#define ResultType NPRESULT
-#define ResultSuccess NPRESULT_SUCCESS
-#elif MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-#define ResultType MotiveAPI::eResult
-#define ResultSuccess ResultType::kApiResult_Success
-#elif MOTIVE_VERSION_MAJOR >= 3
-#define ResultType eMotiveAPIResult
-#define ResultSuccess kApiResult_Success
-#endif
-
-#if MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-#define MotiveTestConnection MotiveAPI::CanConnectToDevices
-#define MotiveInitialize MotiveAPI::Initialize
-#define MotiveUpdate MotiveAPI::Update
-#define MotiveLoadProfile MotiveAPI::LoadProfile
-#define MotiveGetResultString MotiveAPI::MapToResultString
-#define MotiveLoadCalibration MotiveAPI::LoadCalibration
-#define MotiveStreamNP MotiveAPI::StreamNP
-#define MotiveAddRigidBodies MotiveAPI::AddRigidBodies
-#define MotiveCameraCount MotiveAPI::CameraCount
-#define MotiveCameraName MotiveAPI::CameraName
-#define MotiveRigidBodyCount MotiveAPI::RigidBodyCount
-#define MotiveGetRigidBodyName MotiveAPI::RigidBodyName
-#define MotiveShutdown MotiveAPI::Shutdown
-#else
-#define MotiveTestConnection TT_TestSoftwareMutex
-#define MotiveInitialize TT_Initialize
-#define MotiveUpdate TT_Update
-#define MotiveLoadProfile TT_LoadProfile
-#define MotiveGetResultString TT_GetResultString
-#define MotiveLoadCalibration TT_LoadCalibration
-#define MotiveStreamNP TT_StreamNP
-#define MotiveAddRigidBodies TT_AddRigidBodies
-#define MotiveCameraCount TT_CameraCount
-#define MotiveCameraName TT_CameraName
-#define MotiveRigidBodyCount TT_RigidBodyCount
-#define MotiveGetRigidBodyName TT_RigidBodyName
-#define MotiveShutdown TT_Shutdown
-#endif
+// Motive API - dynamic loader replaces static linkage and version #ifdefs
+#include "MotiveDynamicLoader.h"
 
 // std includes
 #include <set>
@@ -82,6 +35,7 @@ public:
     , UnitsToMm(1.0)
     , MotiveDataDescriptionsUpdateTimeSec(1.0)
     , LastMotiveDataDescriptionsUpdateTimestamp(-1)
+    , AttachToRunningMotive(-1)  // default: auto-detect
   {
   }
 
@@ -93,13 +47,9 @@ public:
   NatNetClient* NNClient;
   float UnitsToMm;
 
-  // Motive Files
-#if MOTIVE_VERSION_MAJOR >= 2
+  // Motive Files (Motive 2.x+ use Profile + Calibration)
   std::string Profile;
   std::string Calibration;
-#else
-  std::string ProjectFile;
-#endif
 
   std::string CalibrationFile;
   std::vector<std::string> AdditionalRigidBodyFiles;
@@ -108,20 +58,14 @@ public:
   std::map<int, igsioTransformName> MapRBNameToTransform;
 
   // Flag to run Motive in background if user doesn't need GUI
-  bool AttachToRunningMotive;
+  // -1 = auto-detect (check if Motive.exe is running)
+  //  0 = false (start Motive API in background)
+  //  1 = true (attach to running Motive via NatNet)
+  int AttachToRunningMotive;
 
   // Time of last tool update
   double LastMotiveDataDescriptionsUpdateTimestamp;
   double MotiveDataDescriptionsUpdateTimeSec;
-
-  /*!
-  Print user friendly Motive API message to console
-  */
-#if MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-  std::wstring GetMotiveErrorMessage(ResultType result);
-#else
-  std::string GetMotiveErrorMessage(ResultType result);
-#endif
 
   /*!
   Receive updated tracking information from the server and push the new transforms to the tools
@@ -130,21 +74,6 @@ public:
 
   void UpdateMotiveDataDescriptions();
 };
-
-//-----------------------------------------------------------------------
-#if MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-std::wstring vtkPlusOptiTrack::vtkInternal::GetMotiveErrorMessage(MotiveAPI::eResult result)
-#else
-std::string vtkPlusOptiTrack::vtkInternal::GetMotiveErrorMessage(ResultType result)
-#endif
-{
-#if MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-  return std::wstring(MotiveAPI::MapToResultString(result));
-#else
-return "";
-#endif
-
-}
 
 //-----------------------------------------------------------------------
 void vtkPlusOptiTrack::vtkInternal::UpdateMotiveDataDescriptions()
@@ -199,13 +128,17 @@ PlusStatus vtkPlusOptiTrack::ReadConfiguration(vtkXMLDataElement* rootConfigElem
   LOG_TRACE("vtkPlusOptiTrack::ReadConfiguration");
   XML_FIND_DEVICE_ELEMENT_REQUIRED_FOR_READING(deviceConfig, rootConfigElement);
 
-#if MOTIVE_VERSION_MAJOR >= 2
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(Profile, this->Internal->Profile, deviceConfig);
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(Calibration, this->Internal->Calibration, deviceConfig);
-#else
-  XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(ProjectFile, this->Internal->ProjectFile, deviceConfig);
-#endif
-  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_REQUIRED(AttachToRunningMotive, this->Internal->AttachToRunningMotive, deviceConfig);
+
+  // AttachToRunningMotive is optional: if omitted, auto-detect at connect time
+  bool attachToRunningMotiveValue = false;
+  if (deviceConfig->GetAttribute("AttachToRunningMotive") != nullptr)
+  {
+    XML_READ_BOOL_ATTRIBUTE_NONMEMBER_REQUIRED(AttachToRunningMotive, attachToRunningMotiveValue, deviceConfig);
+    this->Internal->AttachToRunningMotive = attachToRunningMotiveValue ? 1 : 0;
+  }
+  // else remains -1 (auto-detect)
   XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(double, MotiveDataDescriptionsUpdateTimeSec, this->Internal->MotiveDataDescriptionsUpdateTimeSec, deviceConfig);
 
   XML_FIND_NESTED_ELEMENT_REQUIRED(dataSourcesElement, deviceConfig, "DataSources");
@@ -261,145 +194,99 @@ PlusStatus vtkPlusOptiTrack::Probe()
 PlusStatus vtkPlusOptiTrack::InternalConnect()
 {
   LOG_TRACE("vtkPlusOptiTrack::InternalConnect");
-  if (!this->Internal->AttachToRunningMotive)
-  {
-#if MOTIVE_VERSION_MAJOR >= 2
-#if MOTIVE_VERSION_MAJOR >= 3 && MOTIVE_VERSION_MINOR >= 1
-    if (!MotiveTestConnection())
-#else
-    if (MotiveTestConnection() != ResultSuccess)
-#endif
 
+  // Auto-detect: check if Motive is already running
+  bool attachToRunning = false;
+  if (this->Internal->AttachToRunningMotive < 0)
+  {
+    attachToRunning = MotiveDynLoader::IsMotiveRunning();
+    LOG_INFO("Motive auto-detect: Motive.exe is " << (attachToRunning ? "running" : "not running"));
+  }
+  else
+  {
+    attachToRunning = (this->Internal->AttachToRunningMotive != 0);
+  }
+
+  if (!attachToRunning)
+  {
+    // Load Motive API DLL at runtime
+    if (!MotiveDynLoader::Load())
+    {
+      LOG_ERROR("Failed to load Motive API: " << MotiveDynLoader::GetLastError());
+      return PLUS_FAIL;
+    }
+    LOG_INFO("Motive API loaded (version: " << (MotiveDynLoader::GetVersion() == MotiveVersion::V3_1 ? "3.1+" : "3.0.x") << ")");
+
+    // Check no other Motive instance is consuming devices
+    if (!MotiveDynLoader::CanConnectToDevices())
     {
       LOG_ERROR("Failed to start Motive. Another instance is already running.");
       return PLUS_FAIL;
     }
-#endif
 
     // RUN MOTIVE IN BACKGROUND
-    // initialize the API
-    if (MotiveInitialize() != ResultSuccess)
+    if (MotiveDynLoader::Initialize() != 0)
     {
       LOG_ERROR("Failed to start Motive.");
       return PLUS_FAIL;
     }
 
     // pick up recently-arrived cameras
-    MotiveUpdate();
+    MotiveDynLoader::Update();
 
-#if MOTIVE_VERSION_MAJOR >= 2
-    // open project file
+    // Load profile
     std::string profilePath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(this->Internal->Profile);
-#if MOTIVE_VERSION_MAJOR < 3
-    ResultType profileLoad = MotiveLoadProfile(profilePath.c_str());
-#else
     std::wstring wProfilePath = vtksys::Encoding::ToWide(profilePath);
-    ResultType profileLoad = MotiveLoadProfile(wProfilePath.c_str());
-#endif
-    if (profileLoad != ResultSuccess)
+    if (MotiveDynLoader::LoadProfile(wProfilePath.c_str()) != 0)
     {
-#if MOTIVE_VERSION_MAJOR < 3
-      LOG_ERROR("Failed to load Motive profile. Motive error: " << MotiveGetResultString(profileLoad));
-#else
-      LOG_ERROR_W("Failed to load Motive profile. Motive error: " << MotiveGetResultString(profileLoad));
-#endif
+      LOG_ERROR("Failed to load Motive profile from: " << profilePath);
       return PLUS_FAIL;
     }
 
-    // load calibration
+    // Load calibration
     std::string calibrationPath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(this->Internal->Calibration);
-#if MOTIVE_VERSION_MAJOR < 3
-    ResultType calLoad = MotiveLoadCalibration(calibrationPath.c_str());
-#else
     std::wstring wCalibrationPath = vtksys::Encoding::ToWide(calibrationPath);
-    ResultType calLoad = MotiveLoadCalibration(wCalibrationPath.c_str());
-#endif
-    if (profileLoad != ResultSuccess)
+    if (MotiveDynLoader::LoadCalibration(wCalibrationPath.c_str()) != 0)
     {
-#if MOTIVE_VERSION_MAJOR < 3
-      LOG_ERROR("Failed to load Motive calibration. Motive error: " << MotiveGetResultString(profileLoad));
-#else
-      LOG_ERROR_W("Failed to load Motive calibration. Motive error: " << MotiveGetResultString(profileLoad));
-#endif
-      return PLUS_FAIL;
-    }
-#else
-    // open project file
-    std::string projectFilePath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(this->Internal->ProjectFile);
-    NPRESULT ttpLoad = TT_LoadProject(projectFilePath.c_str());
-    if (ttpLoad != NPRESULT_SUCCESS)
-    {
-      LOG_ERROR("Failed to load Motive project file. Motive error: " << MotiveGetResultString(ttpLoad));
-      return PLUS_FAIL;
-    }
-#endif
-
-    // enforce NatNet streaming enabled, this is required for PLUS tracking
-    // this is the equivalent to checking the "Broadcast Frame Data" button in the Motive GUI
-    ResultType streamEnable = MotiveStreamNP(true);
-    if (streamEnable != ResultSuccess)
-    {
-#if MOTIVE_VERSION_MAJOR < 3
-      LOG_ERROR("Failed to enable NatNet streaming. Motive error: " << MotiveGetResultString(streamEnable));
-#else
-      LOG_ERROR_W("Failed to enable NatNet streaming. Motive error: " << MotiveGetResultString(streamEnable));
-#endif
+      LOG_ERROR("Failed to load Motive calibration from: " << calibrationPath);
       return PLUS_FAIL;
     }
 
-    // add any additional rigid body files to project
-    std::string rbFilePath;
+    // Enable NatNet streaming (equivalent to "Broadcast Frame Data" in Motive GUI)
+    if (MotiveDynLoader::StreamNP(true) != 0)
+    {
+      LOG_ERROR("Failed to enable NatNet streaming.");
+      return PLUS_FAIL;
+    }
+
+    // Add any additional rigid body files
     for (auto it = this->Internal->AdditionalRigidBodyFiles.begin(); it != this->Internal->AdditionalRigidBodyFiles.end(); it++)
     {
-      rbFilePath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(*it);
-#if MOTIVE_VERSION_MAJOR < 3
-      ResultType addRBResult = MotiveAddRigidBodies(rbFilePath.c_str());
-#else
+      std::string rbFilePath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(*it);
       std::wstring wRBFilePath = vtksys::Encoding::ToWide(rbFilePath);
-      ResultType addRBResult = MotiveAddRigidBodies(wRBFilePath.c_str());
-#endif
-      if (addRBResult != ResultSuccess)
+      if (MotiveDynLoader::AddRigidBodies(wRBFilePath.c_str()) != 0)
       {
-#if MOTIVE_VERSION_MAJOR < 3
-        LOG_ERROR("Failed to enable NatNet streaming. Motive error: " << MotiveGetResultString(streamEnable));
-#else
-        LOG_ERROR_W("Failed to load rigid body file located at: " << wRBFilePath << ". Motive error message: " << MotiveGetResultString(addRBResult));
-#endif
+        LOG_ERROR("Failed to load rigid body file: " << rbFilePath);
         return PLUS_FAIL;
       }
     }
 
     LOG_INFO("\n---------------------------------MOTIVE SETTINGS--------------------------------");
-    // list connected cameras
     LOG_INFO("Connected cameras:");
-    for (int i = 0; i < MotiveCameraCount(); i++)
+    for (int i = 0; i < MotiveDynLoader::CameraCount(); i++)
     {
-#if MOTIVE_VERSION_MAJOR < 3
-      LOG_INFO(i << ": " << MotiveCameraName(i));
-#else
-      wchar_t cameraName[256];
-      //MotiveCameraName(i, cameraName, (int)sizeof(cameraName));
+      wchar_t cameraName[256] = {};
+      MotiveDynLoader::CameraName(i, cameraName, 256);
       LOG_INFO_W(i << L": " << cameraName);
-#endif
     }
-    // list project file
-#if MOTIVE_VERSION_MAJOR >= 2
     LOG_INFO("\nUsing Motive profile located at:\n" << profilePath);
     LOG_INFO("\nUsing Motive calibration located at:\n" << calibrationPath);
-#else
-    LOG_INFO("\nUsing Motive project file located at:\n" << projectFilePath);
-#endif
-    // list rigid bodies
     LOG_INFO("\nTracked rigid bodies:");
-    for (int i = 0; i < MotiveRigidBodyCount(); ++i)
+    for (int i = 0; i < MotiveDynLoader::RigidBodyCount(); ++i)
     {
-#if MOTIVE_VERSION_MAJOR < 3
-      LOG_INFO(MotiveGetRigidBodyName(i));
-#else
-      wchar_t rigidBodyName[256];
-      MotiveGetRigidBodyName(i, rigidBodyName, (int)sizeof(rigidBodyName));
+      wchar_t rigidBodyName[256] = {};
+      MotiveDynLoader::RigidBodyName(i, rigidBodyName, 256);
       LOG_INFO_W(rigidBodyName);
-#endif
     }
     LOG_INFO("--------------------------------------------------------------------------------\n");
 
@@ -455,9 +342,10 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
 PlusStatus vtkPlusOptiTrack::InternalDisconnect()
 {
   LOG_TRACE("vtkPlusOptiTrack::InternalDisconnect");
-  if (!this->Internal->AttachToRunningMotive)
+  if (MotiveDynLoader::IsLoaded())
   {
-    MotiveShutdown();
+    MotiveDynLoader::Shutdown();
+    MotiveDynLoader::Unload();
   }
 
   return PLUS_SUCCESS;
@@ -480,14 +368,11 @@ PlusStatus vtkPlusOptiTrack::InternalStopRecording()
 PlusStatus vtkPlusOptiTrack::InternalUpdate()
 {
   LOG_TRACE("vtkPlusOptiTrack::InternalUpdate");
-  // InternalUpdate is only called if using Motive API.
-#if MOTIVE_VERSION_MAJOR >= 3
-  MotiveUpdate(); // In Motive 3.X, only updates the latest frame.
-#elif MOTIVE_VERSION_MAJOR >= 2 && MOTIVE_VERSION_MINOR >= 3
-  TT_UpdateLatestFrame();
-#else
-  TT_Update();
-#endif
+  // InternalUpdate is only called if using Motive API (not attach mode)
+  if (MotiveDynLoader::IsLoaded())
+  {
+    MotiveDynLoader::Update();
+  }
   return PLUS_SUCCESS;
 }
 

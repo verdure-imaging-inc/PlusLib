@@ -79,24 +79,40 @@ static const int MAX_BLE_CONNECTION_ATTEMPTS = 20;
 // free helper functions
 //-----------------------------------------------------------------------------
 
-// busy wait for IAsyncOperation to complete
+// event-driven wait for IAsyncOperation to complete (replaces CPU spin loop)
 template <typename TAsyncOp>
 PlusStatus await_async(TAsyncOp op)
 {
-  std::promise<void> wait_prom;
-  std::future<void> wait_future = wait_prom.get_future();
-
-  auto busy_wait = [&](TAsyncOp op)
+  // If already done, skip waiting
+  if (op.Status() != AsyncStatus::Started)
   {
-    while (op.Status() == AsyncStatus::Started);
+    return op.Status() == AsyncStatus::Completed ? PLUS_SUCCESS : PLUS_FAIL;
+  }
 
-    // successful completion
-    wait_prom.set_value();
-  };
+  std::promise<void> completed;
+  std::future<void> future = completed.get_future();
+  std::atomic<bool> promiseSet{false};
 
-  busy_wait(op);
+  // Set callback for when the async operation finishes
+  op.Completed([&](auto&&, auto&&) {
+    bool expected = false;
+    if (promiseSet.compare_exchange_strong(expected, true))
+    {
+      completed.set_value();
+    }
+  });
 
-  std::future_status status = wait_future.wait_for(std::chrono::seconds(BLE_OP_TIMEOUT_SEC));
+  // Handle race: op may have completed between status check and callback registration
+  if (op.Status() != AsyncStatus::Started)
+  {
+    bool expected = false;
+    if (promiseSet.compare_exchange_strong(expected, true))
+    {
+      completed.set_value();
+    }
+  }
+
+  std::future_status status = future.wait_for(std::chrono::seconds(BLE_OP_TIMEOUT_SEC));
   switch (status)
   {
   case std::future_status::ready:
@@ -372,9 +388,14 @@ PlusStatus ClariusBLEPrivate::SetupPowerService()
     return PLUS_FAIL;
   }
 
-  // subscribe to power state changes
-  this->PowerPublishedChar.WriteClientCharacteristicConfigurationDescriptorAsync(
-    GattClientCharacteristicConfigurationDescriptorValue::Notify);
+  // subscribe to power state changes (await the descriptor write)
+  IAsyncOperation<GattCommunicationStatus> powerNotifyOp =
+    this->PowerPublishedChar.WriteClientCharacteristicConfigurationDescriptorAsync(
+      GattClientCharacteristicConfigurationDescriptorValue::Notify);
+  if (await_async(powerNotifyOp) != PLUS_SUCCESS)
+  {
+    LOG_WARNING("Power notification subscription failed");
+  }
   this->PowerPublishedChar.ValueChanged({ this, &ClariusBLEPrivate::PowerStateChanged });
 
   return PLUS_SUCCESS;
@@ -416,9 +437,27 @@ PlusStatus ClariusBLEPrivate::SetupWifiService()
   }
 
   // subscribe to wifi state changes
-  // TODO: Even after subscribing, WifiStateChanged callback doesn't seem to be called.
-  this->WifiPublishedChar.WriteClientCharacteristicConfigurationDescriptorAsync(
-    GattClientCharacteristicConfigurationDescriptorValue::Notify);
+  // MUST await the descriptor write -- if we don't wait for the BLE device to
+  // acknowledge the subscription, notifications won't fire and the callback
+  // will never be called (this was the root cause of the WifiStateChanged bug)
+  IAsyncOperation<GattCommunicationStatus> wifiNotifyOp =
+    this->WifiPublishedChar.WriteClientCharacteristicConfigurationDescriptorAsync(
+      GattClientCharacteristicConfigurationDescriptorValue::Notify);
+  if (await_async(wifiNotifyOp) != PLUS_SUCCESS)
+  {
+    this->LastError = "Failed to subscribe to WiFi state notifications";
+    LOG_WARNING("WiFi notification subscription failed, will fall back to polling");
+  }
+  else if (wifiNotifyOp.GetResults() != GattCommunicationStatus::Success)
+  {
+    LOG_WARNING("WiFi notification subscription returned non-success status: "
+      << this->GattCommunicationStatusToString(wifiNotifyOp.GetResults())
+      << ". Will fall back to polling.");
+  }
+  else
+  {
+    LOG_DEBUG("WiFi state notification subscription active");
+  }
   this->WifiPublishedChar.ValueChanged({ this, &ClariusBLEPrivate::WifiStateChanged });
 
   return PLUS_SUCCESS;
@@ -750,7 +789,7 @@ PlusStatus ClariusBLE::FindBySerial(std::string serialNum)
   std::future<void> deviceInfoFuture = _impl->DeviceInfoPromise.get_future();
   deviceWatcher.Start();
 
-  if (deviceInfoFuture.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready)
+  if (deviceInfoFuture.wait_for(std::chrono::milliseconds(10000)) == std::future_status::ready)
   {
     deviceWatcher.Stop();
     return PLUS_SUCCESS;
@@ -791,7 +830,7 @@ PlusStatus ClariusBLE::Connect()
   PlusStatus success = PLUS_FAIL;
 
   int connectionAttemptCount = 0;
-  int retryDelayMs = 1000;
+  int retryDelayMs = 500;
   while (connectionAttemptCount < MAX_BLE_CONNECTION_ATTEMPTS && !success)
   {
     if (connectionAttemptCount > 0)
@@ -799,6 +838,8 @@ PlusStatus ClariusBLE::Connect()
       LOG_DEBUG("Attempt #" << connectionAttemptCount << " failed. Last error: \"" << this->GetLastError() << "\"");
       this->CloseConnection();
       std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
+      // Exponential backoff: 500ms, 1s, 2s, 4s, capped at 5s
+      retryDelayMs = std::min(retryDelayMs * 2, 5000);
     }
 
     ++connectionAttemptCount;

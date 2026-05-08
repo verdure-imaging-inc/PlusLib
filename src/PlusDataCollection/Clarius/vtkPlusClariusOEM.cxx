@@ -19,9 +19,8 @@
 #include "ClariusBLE.h"
 #include "ClariusWifi.h"
 
-// Clarius Includes
-#include <solum.h>
-#include <solum_def.h>
+// Clarius Includes - dynamic loader replaces static solum.h linkage
+#include "SolumDynamicLoader.h"
 
 // VTK includes
 #include <vtkImageData.h>
@@ -127,6 +126,8 @@ namespace
   static const std::string TEMP_FIELD_TAG = "ClariusTemp";
   static const std::string FRAME_RATE_FIELD_TAG = "ClariusFrameRate";
   static const std::string BUTTON_FIELD_TAG = "ClariusButton";
+  static const std::string FAN_FIELD_TAG = "ClariusFan";
+  static const std::string CHARGER_FIELD_TAG = "ClariusCharger";
   static const std::string UP_BUTTON_TAG = "Up";
   static const std::string DOWN_BUTTON_TAG = "Down";
   static const std::string NO_BUTTON_TAG = "None";
@@ -301,6 +302,14 @@ protected:
 
   CusStatusInfo CurrentStatus;
 
+  // Reconnection state
+  std::atomic<bool> NeedsReconnection{false};
+  std::atomic<bool> ProbeWillRestart{false};
+  std::atomic<bool> IntentionalDisconnect{false};  // suppress reconnection on user-initiated disconnect
+  int ReconnectionAttempts{0};
+  static const int MAX_RECONNECTION_ATTEMPTS = 10;
+  static const int RECONNECTION_DELAY_MS = 3000;
+
   bool EnableAutoFocus;
 
   enum class EXPECTED_LIST
@@ -391,19 +400,34 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(CusConnection ret, int port, cons
   switch (ret)
   {
   case ConnectionError:
-    LOG_ERROR("Connection status: error - " << status);
-    device->Disconnect();
+    if (!device->Internal->IntentionalDisconnect)
+    {
+      LOG_WARNING("Connection status: error - " << status << ". Will attempt reconnection.");
+      device->Internal->NeedsReconnection = true;
+    }
     break;
   case ProbeConnected:
     LOG_INFO("Connection status: probe connected - " << status);
+    device->Internal->NeedsReconnection = false;
+    device->Internal->ReconnectionAttempts = 0;
     break;
   case ProbeDisconnected:
-    LOG_INFO("Connection status: probe disconnected - " << status);
-    device->Disconnect();
+    if (!device->Internal->IntentionalDisconnect)
+    {
+      LOG_WARNING("Connection status: probe disconnected - " << status << ". Will attempt reconnection.");
+      device->Internal->NeedsReconnection = true;
+    }
+    else
+    {
+      LOG_INFO("Connection status: probe disconnected (user-initiated) - " << status);
+    }
     break;
   case ConnectionFailed:
-    LOG_ERROR("Connection status: connection failed - " << status);
-    device->Disconnect();
+    if (!device->Internal->IntentionalDisconnect)
+    {
+      LOG_WARNING("Connection status: connection failed - " << status << ". Will attempt reconnection.");
+      device->Internal->NeedsReconnection = true;
+    }
     break;
   case SwUpdateRequired:
     LOG_INFO("Connection status: software update required - " << status);
@@ -468,7 +492,16 @@ void vtkPlusClariusOEM::vtkInternal::PowerDownFn(CusPowerDown ret, int tm)
   }
 
   ss << "If Clarius probe has powered off please turn it back on and restart PLUS, if desired.";
-  LOG_ERROR(ss.str());
+  LOG_WARNING(ss.str());
+
+  // Signal that the probe may come back online (unless it was a button-off)
+  if (ret != CusPowerDown::ButtonOff)
+  {
+    vtkPlusClariusOEM* device = vtkPlusClariusOEM::GetInstance();
+    device->Internal->ProbeWillRestart = true;
+    device->Internal->NeedsReconnection = true;
+    LOG_INFO("Will monitor for probe reconnection...");
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -524,10 +557,55 @@ void vtkPlusClariusOEM::vtkInternal::ImuDataFn(const CusPosInfo* pos)
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::InternalUpdate()
 {
+  // Check for reconnection needs
+  if (this->Internal->NeedsReconnection)
+  {
+    if (this->Internal->ReconnectionAttempts < this->Internal->MAX_RECONNECTION_ATTEMPTS)
+    {
+      this->Internal->ReconnectionAttempts++;
+      LOG_INFO("Attempting reconnection to Clarius probe (attempt "
+        << this->Internal->ReconnectionAttempts << "/"
+        << this->Internal->MAX_RECONNECTION_ATTEMPTS << ")...");
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(this->Internal->RECONNECTION_DELAY_MS));
+
+      // Try to reconnect via solumConnect
+      CusConnectionParams connParams;
+      connParams.ipAddress = this->Internal->IpAddress.c_str();
+      connParams.port = this->Internal->TcpPort;
+      int result = solumConnect(&connParams);
+      if (result == CusConnection::ProbeConnected)
+      {
+        LOG_INFO("Reconnection initiated successfully");
+        // NeedsReconnection will be cleared by ConnectedFn callback
+      }
+      else
+      {
+        LOG_WARNING("Reconnection attempt failed (code: " << result << ")");
+      }
+    }
+    else if (this->Internal->ReconnectionAttempts == this->Internal->MAX_RECONNECTION_ATTEMPTS)
+    {
+      LOG_ERROR("Max reconnection attempts reached. Please restart PLUS to reconnect.");
+      this->Internal->ReconnectionAttempts++; // prevent repeated error messages
+    }
+    return PLUS_SUCCESS;
+  }
+
+  // Normal operation: update probe status
   if (this->UpdateProbeStatus() != PLUS_SUCCESS)
   {
     LOG_ERROR("Failed to update probe status");
   }
+
+  // Periodic health check
+  int connState = solumIsConnected();
+  if (connState != CLARIUS_STATE_CONNECTED && connState != CLARIUS_STATE_NOT_INITIALIZED)
+  {
+    LOG_WARNING("Connection health check: probe is not connected (state=" << connState << ")");
+    this->Internal->NeedsReconnection = true;
+  }
+
   return PLUS_SUCCESS;
 }
 
@@ -634,6 +712,10 @@ void vtkPlusClariusOEM::vtkInternal::ProcessedImageFn(const void* oemImage, cons
   customFields[TEMP_FIELD_TAG].second = std::to_string(device->Internal->CurrentStatus.temperature);
   customFields[FRAME_RATE_FIELD_TAG].first = FRAMEFIELD_FORCE_SERVER_SEND;
   customFields[FRAME_RATE_FIELD_TAG].second = std::to_string(device->Internal->CurrentStatus.frameRate);
+  customFields[FAN_FIELD_TAG].first = FRAMEFIELD_FORCE_SERVER_SEND;
+  customFields[FAN_FIELD_TAG].second = std::to_string(static_cast<int>(device->Internal->CurrentStatus.fan));
+  customFields[CHARGER_FIELD_TAG].first = FRAMEFIELD_FORCE_SERVER_SEND;
+  customFields[CHARGER_FIELD_TAG].second = std::to_string(static_cast<int>(device->Internal->CurrentStatus.charger));
 
   customFields[BUTTON_FIELD_TAG].first = FRAMEFIELD_FORCE_SERVER_SEND;
   customFields[BUTTON_FIELD_TAG].second = device->Internal->PressedButton;
@@ -1385,6 +1467,18 @@ PlusStatus vtkPlusClariusOEM::InitializeOEM()
 {
   LOG_TRACE("vtkPlusClariusOEM::InitializeOEM");
 
+  // Load Solum DLL at runtime (version-independent)
+  if (!SolumDynLoader::Load())
+  {
+    LOG_ERROR("Failed to load Clarius Solum SDK: " << SolumDynLoader::GetLastError());
+    return PLUS_FAIL;
+  }
+  LOG_INFO("Clarius Solum SDK loaded successfully");
+  if (!SolumDynLoader::GetLastError().empty())
+  {
+    LOG_WARNING("Solum loader: " << SolumDynLoader::GetLastError());
+  }
+
   // placeholder argc / argv arguments
   int argc = 1;
   char** argv = new char* [1];
@@ -1685,6 +1779,11 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalConnect");
 
+  // Reset reconnection state for fresh connection
+  this->Internal->IntentionalDisconnect = false;
+  this->Internal->NeedsReconnection = false;
+  this->Internal->ReconnectionAttempts = 0;
+
   if (this->Connected)
   {
     // Internal connect already called and completed successfully
@@ -1815,7 +1914,20 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     return PLUS_SUCCESS;
   }
 
+  // optimize WiFi channel for best stability in busy RF environments
+  if (SolumDynLoader::HasFunction("solumOptimizeWifi"))
+  {
+    LOG_INFO("Optimizing Clarius WiFi channel...");
+    if (solumOptimizeWifi(WifiOptSearch) < 0)
+    {
+      LOG_WARNING("Failed to optimize Clarius WiFi channel");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
+  }
+
   // enable the 5v rail on the top of the Clarius probe
+  // Note: 5v is also managed in InternalStartRecording/InternalStopRecording
+  //       to avoid running the fan during idle/charging
   int enable5v = this->Internal->Enable5v ? 1 : 0;
   if (solumEnable5v(enable5v) < 0)
   {
@@ -1879,6 +1991,9 @@ void vtkPlusClariusOEM::DeInitializeOEM()
   {
     LOG_WARNING("Failed to destroy Clarius OEM library");
   }
+
+  // Unload Solum DLL
+  SolumDynLoader::Unload();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1932,6 +2047,10 @@ PlusStatus vtkPlusClariusOEM::InternalDisconnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
 
+  // Suppress auto-reconnection during intentional disconnect
+  this->Internal->IntentionalDisconnect = true;
+  this->Internal->NeedsReconnection = false;
+
   // inverse order to initialization
   this->DeInitializeOEM();
   this->DeInitializeWifi();
@@ -1958,6 +2077,7 @@ PlusStatus vtkPlusClariusOEM::InternalStartRecording()
       continue;
     }
     running = true;
+    break;
   }
 
   if (!running)
@@ -1966,6 +2086,15 @@ PlusStatus vtkPlusClariusOEM::InternalStartRecording()
     return PLUS_FAIL;
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
+
+  // enable 5v rail when imaging starts (powers accessories, also runs fan)
+  if (this->Internal->Enable5v)
+  {
+    if (solumEnable5v(1) < 0)
+    {
+      LOG_WARNING("Failed to enable 5v rail on imaging start");
+    }
+  }
 
   return PLUS_SUCCESS;
 }
@@ -1999,6 +2128,15 @@ PlusStatus vtkPlusClariusOEM::InternalStopRecording()
     return PLUS_FAIL;
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(CLARIUS_LONG_DELAY_MS));
+
+  // disable 5v rail when imaging stops (stops fan, saves power during idle/charging)
+  if (this->Internal->Enable5v)
+  {
+    if (solumEnable5v(0) < 0)
+    {
+      LOG_WARNING("Failed to disable 5v rail on imaging stop");
+    }
+  }
 
   return PLUS_SUCCESS;
 }
