@@ -141,15 +141,22 @@ public:
     if (!hModule)
     {
       // Try standard Motive install location
+      // Must set DLL directory so MotiveAPI.dll's own dependencies are found
+      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive\\lib");
       hModule = LoadLibraryA("C:\\Program Files\\OptiTrack\\Motive\\lib\\MotiveAPI.dll");
+      SetDllDirectoryA(nullptr); // restore default search order
     }
     if (!hModule)
     {
+      // Try Motive 2.x install location
+      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive\\lib");
       hModule = LoadLibraryA("MotiveAPI.dll");
+      SetDllDirectoryA(nullptr);
     }
     if (!hModule)
     {
-      lastError = "Failed to load MotiveAPI.dll";
+      DWORD err = ::GetLastError();
+      lastError = "Failed to load MotiveAPI.dll (Windows error " + std::to_string(err) + ")";
       return false;
     }
 
