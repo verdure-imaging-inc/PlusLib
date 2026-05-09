@@ -141,15 +141,15 @@ public:
     if (!hModule)
     {
       // Try standard Motive install location
-      // Must set DLL directory so MotiveAPI.dll's own dependencies are found
-      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive\\lib");
+      // Set DLL directory to ROOT Motive folder where runtime deps live (opencv, Qt5, tbb, etc.)
+      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive");
       hModule = LoadLibraryA("C:\\Program Files\\OptiTrack\\Motive\\lib\\MotiveAPI.dll");
       SetDllDirectoryA(nullptr); // restore default search order
     }
     if (!hModule)
     {
-      // Try Motive 2.x install location
-      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive\\lib");
+      // Retry with lib directory for older installs
+      SetDllDirectoryA("C:\\Program Files\\OptiTrack\\Motive");
       hModule = LoadLibraryA("MotiveAPI.dll");
       SetDllDirectoryA(nullptr);
     }
