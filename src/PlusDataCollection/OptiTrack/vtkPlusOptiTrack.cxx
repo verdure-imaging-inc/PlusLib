@@ -225,14 +225,9 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
     if (!attachToRunning)
     {
       this->Internal->MotiveSkipped = true;
-      // Push identity transforms to all tool buffers so they are not empty
-      // This prevents "buffer item not in buffer" warnings from the output channel
-      vtkSmartPointer<vtkMatrix4x4> identity = vtkSmartPointer<vtkMatrix4x4>::New();
-      identity->Identity();
-      for (DataSourceContainerConstIterator it = this->GetToolIteratorBegin(); it != this->GetToolIteratorEnd(); ++it)
-      {
-        this->ToolTimeStampedUpdate(it->second->GetId(), identity, TOOL_OUT_OF_VIEW, this->FrameNumber, vtkIGSIOAccurateTimer::GetSystemTime());
-      }
+      // Enable the internal update thread to push identity transforms periodically
+      this->StartThreadForInternalUpdates = true;
+      this->InternalUpdateRate = 30; // 30 Hz is enough for timestamp synchronization
       LOG_INFO("OptiTrack: skipped (Motive not running). Tracker tools initialized with identity transforms.");
       return PLUS_SUCCESS;
     }
@@ -405,6 +400,21 @@ PlusStatus vtkPlusOptiTrack::InternalStopRecording()
 PlusStatus vtkPlusOptiTrack::InternalUpdate()
 {
   LOG_TRACE("vtkPlusOptiTrack::InternalUpdate");
+
+  if (this->Internal->MotiveSkipped)
+  {
+    // Push identity transforms with current timestamp so output channels stay synchronized
+    vtkSmartPointer<vtkMatrix4x4> identity = vtkSmartPointer<vtkMatrix4x4>::New();
+    identity->Identity();
+    const double timestamp = vtkIGSIOAccurateTimer::GetSystemTime();
+    for (DataSourceContainerConstIterator it = this->GetToolIteratorBegin(); it != this->GetToolIteratorEnd(); ++it)
+    {
+      this->ToolTimeStampedUpdate(it->second->GetId(), identity, TOOL_OUT_OF_VIEW, this->FrameNumber, timestamp);
+    }
+    this->FrameNumber++;
+    return PLUS_SUCCESS;
+  }
+
   // InternalUpdate is only called if using Motive API (not attach mode)
   if (MotiveDynLoader::IsLoaded())
   {
