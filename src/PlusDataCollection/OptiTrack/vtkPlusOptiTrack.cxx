@@ -7,6 +7,7 @@ See License.txt for details.
 // Local includes
 #include "PlusConfigure.h"
 #include "vtkPlusOptiTrack.h"
+#include "vtkPlusDataSource.h"
 
 // VTK includes
 #include <vtkSmartPointer.h>
@@ -36,6 +37,7 @@ public:
     , MotiveDataDescriptionsUpdateTimeSec(1.0)
     , LastMotiveDataDescriptionsUpdateTimestamp(-1)
     , AttachToRunningMotive(-1)  // default: auto-detect
+    , MotiveSkipped(false)
   {
   }
 
@@ -62,6 +64,9 @@ public:
   //  0 = false (start Motive API in background)
   //  1 = true (attach to running Motive via NatNet)
   int AttachToRunningMotive;
+
+  // Flag: auto-detect determined Motive is not running, device is idle
+  bool MotiveSkipped;
 
   // Time of last tool update
   double LastMotiveDataDescriptionsUpdateTimestamp;
@@ -219,6 +224,16 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
     LOG_INFO("Motive auto-detect: Motive.exe is " << (attachToRunning ? "running, will attach" : "not running, skipping OptiTrack"));
     if (!attachToRunning)
     {
+      this->Internal->MotiveSkipped = true;
+      // Push identity transforms to all tool buffers so they are not empty
+      // This prevents "buffer item not in buffer" warnings from the output channel
+      vtkSmartPointer<vtkMatrix4x4> identity = vtkSmartPointer<vtkMatrix4x4>::New();
+      identity->Identity();
+      for (DataSourceContainerConstIterator it = this->GetToolIteratorBegin(); it != this->GetToolIteratorEnd(); ++it)
+      {
+        this->ToolTimeStampedUpdate(it->second->GetId(), identity, TOOL_OUT_OF_VIEW, this->FrameNumber, vtkIGSIOAccurateTimer::GetSystemTime());
+      }
+      LOG_INFO("OptiTrack: skipped (Motive not running). Tracker tools initialized with identity transforms.");
       return PLUS_SUCCESS;
     }
   }
@@ -375,12 +390,14 @@ PlusStatus vtkPlusOptiTrack::InternalDisconnect()
 PlusStatus vtkPlusOptiTrack::InternalStartRecording()
 {
   LOG_TRACE("vtkPlusOptiTrack::InternalStartRecording");
+  if (this->Internal->MotiveSkipped) { return PLUS_SUCCESS; }
   return PLUS_SUCCESS;
 }
 
 //----------------------------------------------------------------------------
 PlusStatus vtkPlusOptiTrack::InternalStopRecording()
 {
+  if (this->Internal->MotiveSkipped) { return PLUS_SUCCESS; }
   return PLUS_SUCCESS;
 }
 
