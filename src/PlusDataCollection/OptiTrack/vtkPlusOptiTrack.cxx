@@ -221,15 +221,14 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
   if (this->Internal->AttachToRunningMotive < 0)
   {
     attachToRunning = MotiveDynLoader::IsMotiveRunning();
-    LOG_INFO("Motive auto-detect: Motive.exe is " << (attachToRunning ? "running, will attach" : "not running, skipping OptiTrack"));
-    if (!attachToRunning)
+    if (attachToRunning)
     {
-      this->Internal->MotiveSkipped = true;
-      // Enable the internal update thread to push identity transforms periodically
-      this->StartThreadForInternalUpdates = true;
-      this->InternalUpdateRate = 30; // 30 Hz is enough for timestamp synchronization
-      LOG_INFO("OptiTrack: skipped (Motive not running). Tracker tools initialized with identity transforms.");
-      return PLUS_SUCCESS;
+      LOG_INFO("Motive auto-detect: Motive.exe is running, will attach via NatNet");
+    }
+    else
+    {
+      LOG_INFO("Motive auto-detect: Motive.exe is not running, will try headless API mode");
+      // Fall through to the !attachToRunning path which loads MotiveAPI.dll
     }
   }
   else
@@ -242,6 +241,15 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
     // Load Motive API DLL at runtime
     if (!MotiveDynLoader::Load())
     {
+      if (this->Internal->AttachToRunningMotive < 0)
+      {
+        // Auto-detect mode: MotiveAPI.dll not available, fall back to US-only
+        LOG_WARNING("Motive auto-detect: MotiveAPI.dll not available. Continuing without tracking.");
+        this->Internal->MotiveSkipped = true;
+        this->StartThreadForInternalUpdates = true;
+        this->InternalUpdateRate = 30;
+        return PLUS_SUCCESS;
+      }
       LOG_ERROR("Failed to load Motive API: " << MotiveDynLoader::GetLastError());
       return PLUS_FAIL;
     }
