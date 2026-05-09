@@ -216,7 +216,11 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
   if (this->Internal->AttachToRunningMotive < 0)
   {
     attachToRunning = MotiveDynLoader::IsMotiveRunning();
-    LOG_INFO("Motive auto-detect: Motive.exe is " << (attachToRunning ? "running" : "not running"));
+    LOG_INFO("Motive auto-detect: Motive.exe is " << (attachToRunning ? "running, will attach" : "not running, skipping OptiTrack"));
+    if (!attachToRunning)
+    {
+      return PLUS_SUCCESS;
+    }
   }
   else
   {
