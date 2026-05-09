@@ -244,7 +244,7 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
       if (this->Internal->AttachToRunningMotive < 0)
       {
         // Auto-detect mode: MotiveAPI.dll not available, fall back to US-only
-        LOG_WARNING("Motive auto-detect: MotiveAPI.dll not available. Continuing without tracking.");
+        LOG_WARNING("Motive auto-detect: MotiveAPI.dll not available (" << MotiveDynLoader::GetLastError() << "). Continuing without tracking.");
         this->Internal->MotiveSkipped = true;
         this->StartThreadForInternalUpdates = true;
         this->InternalUpdateRate = 30;
