@@ -131,12 +131,28 @@ PlusStatus vtkPlusOptiTrack::ReadConfiguration(vtkXMLDataElement* rootConfigElem
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(Profile, this->Internal->Profile, deviceConfig);
   XML_READ_STRING_ATTRIBUTE_NONMEMBER_REQUIRED(Calibration, this->Internal->Calibration, deviceConfig);
 
-  // AttachToRunningMotive is optional: if omitted, auto-detect at connect time
-  bool attachToRunningMotiveValue = false;
-  if (deviceConfig->GetAttribute("AttachToRunningMotive") != nullptr)
+  // AttachToRunningMotive: TRUE/FALSE or -1 (auto-detect), 0 (false), 1 (true)
+  const char* attachAttr = deviceConfig->GetAttribute("AttachToRunningMotive");
+  if (attachAttr != nullptr)
   {
-    XML_READ_BOOL_ATTRIBUTE_NONMEMBER_REQUIRED(AttachToRunningMotive, attachToRunningMotiveValue, deviceConfig);
-    this->Internal->AttachToRunningMotive = attachToRunningMotiveValue ? 1 : 0;
+    std::string val(attachAttr);
+    if (val == "TRUE" || val == "true" || val == "1")
+    {
+      this->Internal->AttachToRunningMotive = 1;
+    }
+    else if (val == "FALSE" || val == "false" || val == "0")
+    {
+      this->Internal->AttachToRunningMotive = 0;
+    }
+    else if (val == "-1" || val == "AUTO" || val == "auto")
+    {
+      this->Internal->AttachToRunningMotive = -1;
+    }
+    else
+    {
+      LOG_WARNING("Unknown AttachToRunningMotive value '" << val << "', using auto-detect (-1)");
+      this->Internal->AttachToRunningMotive = -1;
+    }
   }
   // else remains -1 (auto-detect)
   XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(double, MotiveDataDescriptionsUpdateTimeSec, this->Internal->MotiveDataDescriptionsUpdateTimeSec, deviceConfig);
