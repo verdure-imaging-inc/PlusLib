@@ -1961,6 +1961,12 @@ void vtkPlusClariusOEM::DeInitializeOEM()
 {
   LOG_TRACE("vtkPlusClariusOEM::DeInitializeOEM");
 
+  // Guard: Solum library may not be loaded yet (e.g. during device factory enumeration)
+  if (!SolumDynLoader::IsLoaded())
+  {
+    return;
+  }
+
   int oemState = solumIsConnected();
   if (oemState == CLARIUS_STATE_NOT_INITIALIZED)
   {
@@ -2046,6 +2052,12 @@ void vtkPlusClariusOEM::DeInitializeBLE()
 PlusStatus vtkPlusClariusOEM::InternalDisconnect()
 {
   LOG_TRACE("vtkPlusClariusOEM::InternalDisconnect");
+
+  // Guard: Solum library may not be loaded yet (e.g. during device factory enumeration)
+  if (!SolumDynLoader::IsLoaded())
+  {
+    return PLUS_SUCCESS;
+  }
 
   // Suppress auto-reconnection during intentional disconnect
   this->Internal->IntentionalDisconnect = true;
