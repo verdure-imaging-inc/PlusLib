@@ -273,6 +273,8 @@ protected:
   int AutoFreezeTimeoutSec;
   int KeepAwakeTimeoutMin;
   int DeepSleepTimeoutHr;
+  bool OptimizeWifiChannel;
+  bool PowerOffOnDisconnect;
   BUTTON_MODE UpButtonMode;
   BUTTON_MODE DownButtonMode;
   int ImagingMode;
@@ -354,6 +356,8 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
   , AutoFreezeTimeoutSec(DEFAULT_AUTO_FREEZE_TIMEOUT_SEC)
   , KeepAwakeTimeoutMin(DEFAULT_KEEP_AWAKE_TIMEOUT_SEC)
   , DeepSleepTimeoutHr(DEFAULT_DEEP_SLEEP_TIMEOUT_HR)
+  , OptimizeWifiChannel(false)
+  , PowerOffOnDisconnect(false)
   , UpButtonMode(DEFAULT_UP_BUTTON_MODE)
   , DownButtonMode(DEFAULT_DOWN_BUTTON_MODE)
   , ImagingMode(CusMode::BMode)
@@ -1139,6 +1143,14 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(int, DeepSleepTimeoutHr,
     this->Internal->DeepSleepTimeoutHr, deviceConfig);
 
+  // WiFi channel optimization (default: FALSE for connection stability)
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(OptimizeWifiChannel,
+    this->Internal->OptimizeWifiChannel, deviceConfig);
+
+  // Power off probe on disconnect (default: FALSE, probe stays on)
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(PowerOffOnDisconnect,
+    this->Internal->PowerOffOnDisconnect, deviceConfig);
+
   // up button mode
   XML_READ_ENUM3_ATTRIBUTE_NONMEMBER_OPTIONAL(UpButtonMode,
     this->Internal->UpButtonMode, deviceConfig,
@@ -1922,7 +1934,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   }
 
   // optimize WiFi channel for best stability in busy RF environments
-  if (SolumDynLoader::HasFunction("solumOptimizeWifi"))
+  if (this->Internal->OptimizeWifiChannel && SolumDynLoader::HasFunction("solumOptimizeWifi"))
   {
     LOG_INFO("Optimizing Clarius WiFi channel...");
     if (solumOptimizeWifi(WifiOptSearch) < 0)
@@ -2028,6 +2040,12 @@ void vtkPlusClariusOEM::DeInitializeWifi()
 void vtkPlusClariusOEM::DeInitializeProbe()
 {
   LOG_TRACE("vtkPlusClariusOEM::DeInitializeProbe");
+
+  if (!this->Internal->PowerOffOnDisconnect)
+  {
+    LOG_INFO("PowerOffOnDisconnect is FALSE, probe will stay on");
+    return;
+  }
 
   // power off the probe if powered / connected over BLE
   if (!this->Internal->BleHelper.IsProbeConnected())
