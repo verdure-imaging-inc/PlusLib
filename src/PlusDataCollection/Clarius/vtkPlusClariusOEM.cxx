@@ -307,8 +307,8 @@ protected:
   std::atomic<bool> ProbeWillRestart{false};
   std::atomic<bool> IntentionalDisconnect{false};  // suppress reconnection on user-initiated disconnect
   int ReconnectionAttempts{0};
-  static const int MAX_RECONNECTION_ATTEMPTS = 10;
-  static const int RECONNECTION_DELAY_MS = 3000;
+  static const int MAX_RECONNECTION_ATTEMPTS = 30;
+  static const int RECONNECTION_DELAY_MS = 2000;
 
   bool EnableAutoFocus;
 
@@ -407,6 +407,10 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(CusConnection ret, int port, cons
     }
     break;
   case ProbeConnected:
+    if (device->Internal->ReconnectionAttempts > device->Internal->MAX_RECONNECTION_ATTEMPTS)
+    {
+      LOG_INFO("Late connection accepted after max reconnection attempts were reached");
+    }
     LOG_INFO("Connection status: probe connected - " << status);
     device->Internal->NeedsReconnection = false;
     device->Internal->ReconnectionAttempts = 0;
@@ -586,6 +590,17 @@ PlusStatus vtkPlusClariusOEM::InternalUpdate()
     }
     else if (this->Internal->ReconnectionAttempts == this->Internal->MAX_RECONNECTION_ATTEMPTS)
     {
+      // Wait a few seconds for a late async connection callback before giving up
+      LOG_INFO("Max reconnection attempts reached, waiting 5 seconds for pending connection...");
+      for (int waitCount = 0; waitCount < 5; waitCount++)
+      {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!this->Internal->NeedsReconnection)
+        {
+          LOG_INFO("Late connection succeeded during wait period!");
+          return PLUS_SUCCESS;
+        }
+      }
       LOG_ERROR("Max reconnection attempts reached. Please restart PLUS to reconnect.");
       this->Internal->ReconnectionAttempts++; // prevent repeated error messages
     }
