@@ -776,7 +776,6 @@ PlusStatus ClariusBLE::FindBySerial(std::string serialNum)
   std::string fullBleName = "CUS-" + serialNum;
   _impl->ProbeId = to_wide_string(fullBleName);
 
-  // Search for all BLE devices (paired and unpaired) to avoid stale pairing cache issues
   DeviceWatcher deviceWatcher{ nullptr };
   winrt::hstring aqsFilter{ BluetoothLEDevice::GetDeviceSelectorFromPairingState(true) };
   deviceWatcher = DeviceInformation::CreateWatcher(
@@ -796,30 +795,7 @@ PlusStatus ClariusBLE::FindBySerial(std::string serialNum)
     return PLUS_SUCCESS;
   }
 
-  // Paired search failed, try unpaired devices (probe may need fresh pairing)
   deviceWatcher.Stop();
-  LOG_INFO("Probe not found in paired devices, searching unpaired BLE devices...");
-  _impl->DeviceInfoPromise = std::promise<void>();
-  DeviceWatcher unpairedWatcher{ nullptr };
-  winrt::hstring unpairedFilter{ BluetoothLEDevice::GetDeviceSelectorFromPairingState(false) };
-  unpairedWatcher = DeviceInformation::CreateWatcher(
-    unpairedFilter,
-    nullptr,
-    DeviceInformationKind::AssociationEndpoint
-  );
-  unpairedWatcher.Added({ _impl.get(), &ClariusBLEPrivate::DeviceAdded });
-  unpairedWatcher.Updated({ _impl.get(), &ClariusBLEPrivate::DeviceUpdated });
-
-  std::future<void> unpairedFuture = _impl->DeviceInfoPromise.get_future();
-  unpairedWatcher.Start();
-
-  if (unpairedFuture.wait_for(std::chrono::milliseconds(10000)) == std::future_status::ready)
-  {
-    unpairedWatcher.Stop();
-    return PLUS_SUCCESS;
-  }
-
-  unpairedWatcher.Stop();
   return PLUS_FAIL;
 }
 
@@ -864,42 +840,6 @@ PlusStatus ClariusBLE::Connect()
       std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
       // Exponential backoff: 500ms, 1s, 2s, 4s, capped at 5s
       retryDelayMs = std::min(retryDelayMs * 2, 5000);
-
-      // After 3 failed attempts, clear stale BLE cache by unpairing and re-discovering
-      if (connectionAttemptCount == 3)
-      {
-        LOG_INFO("BLE connection failing, clearing stale Bluetooth cache and re-discovering probe...");
-        try
-        {
-          if (_impl->DeviceInfo && _impl->DeviceInfo.Pairing().IsPaired())
-          {
-            auto unpairOp = _impl->DeviceInfo.Pairing().UnpairAsync();
-            await_async(unpairOp);
-            LOG_INFO("Unpaired stale BLE device, re-discovering...");
-          }
-        }
-        catch (...) { LOG_DEBUG("Unpair attempt threw exception, continuing..."); }
-
-        // Re-discover the probe as an unpaired device
-        _impl->DeviceInfoPromise = std::promise<void>();
-        _impl->DeviceInfo = nullptr;
-        DeviceWatcher freshWatcher{ nullptr };
-        winrt::hstring freshFilter{ BluetoothLEDevice::GetDeviceSelectorFromPairingState(false) };
-        freshWatcher = DeviceInformation::CreateWatcher(freshFilter, nullptr, DeviceInformationKind::AssociationEndpoint);
-        freshWatcher.Added({ _impl.get(), &ClariusBLEPrivate::DeviceAdded });
-        freshWatcher.Updated({ _impl.get(), &ClariusBLEPrivate::DeviceUpdated });
-        std::future<void> freshFuture = _impl->DeviceInfoPromise.get_future();
-        freshWatcher.Start();
-        if (freshFuture.wait_for(std::chrono::milliseconds(10000)) == std::future_status::ready)
-        {
-          LOG_INFO("Re-discovered probe as unpaired device, continuing connection attempts...");
-        }
-        else
-        {
-          LOG_WARNING("Failed to re-discover probe after unpairing");
-        }
-        freshWatcher.Stop();
-      }
     }
 
     ++connectionAttemptCount;
