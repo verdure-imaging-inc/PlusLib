@@ -1796,9 +1796,16 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   // BLE
   if (this->InitializeBLE() != PLUS_SUCCESS)
   {
-    LOG_ERROR("Failed to initialize BLE in Clarius OEM device");
-    this->InternalDisconnect();
-    return PLUS_FAIL;
+    // BLE failed -- may be stale cache. Clean up, unpair, retry once.
+    LOG_WARNING("BLE connection failed. Clearing Bluetooth cache and retrying...");
+    this->Internal->BleHelper.ForceUnpair();
+    this->Internal->BleHelper.CloseConnection();
+    if (this->InitializeBLE() != PLUS_SUCCESS)
+    {
+      LOG_ERROR("Failed to initialize BLE in Clarius OEM device after cache clear");
+      this->InternalDisconnect();
+      return PLUS_FAIL;
+    }
   }
 
   // PROBE (power, etc.)

@@ -108,6 +108,7 @@ public:
   /*!
   * Close the BLE connection.
   */
+  PlusStatus ForceUnpair();
   PlusStatus CloseConnection();
 
   /*!

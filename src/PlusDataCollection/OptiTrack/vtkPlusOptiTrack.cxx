@@ -248,6 +248,16 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
         this->Internal->MotiveSkipped = true;
         this->StartThreadForInternalUpdates = true;
         this->InternalUpdateRate = 30;
+        // Pre-fill tracker buffers so output channel has data from the start
+        {
+          vtkSmartPointer<vtkMatrix4x4> identity = vtkSmartPointer<vtkMatrix4x4>::New();
+          identity->Identity();
+          const double ts = vtkIGSIOAccurateTimer::GetSystemTime();
+          for (DataSourceContainerConstIterator it = this->GetToolIteratorBegin(); it != this->GetToolIteratorEnd(); ++it)
+          {
+            this->ToolTimeStampedUpdate(it->second->GetId(), identity, TOOL_OUT_OF_VIEW, this->FrameNumber, ts);
+          }
+        }
         return PLUS_SUCCESS;
       }
       LOG_ERROR("Failed to load Motive API: " << MotiveDynLoader::GetLastError());
@@ -372,6 +382,17 @@ PlusStatus vtkPlusOptiTrack::InternalConnect()
 
   // cause update of tools from Motive
   this->Internal->LastMotiveDataDescriptionsUpdateTimestamp = -1;
+
+  // Pre-fill tracker buffers so output channel has data from the start (prevents "no overlap" errors)
+  {
+    vtkSmartPointer<vtkMatrix4x4> identity = vtkSmartPointer<vtkMatrix4x4>::New();
+    identity->Identity();
+    const double ts = vtkIGSIOAccurateTimer::GetSystemTime();
+    for (DataSourceContainerConstIterator it = this->GetToolIteratorBegin(); it != this->GetToolIteratorEnd(); ++it)
+    {
+      this->ToolTimeStampedUpdate(it->second->GetId(), identity, TOOL_OUT_OF_VIEW, this->FrameNumber, ts);
+    }
+  }
 
   return PLUS_SUCCESS;
 }

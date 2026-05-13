@@ -882,6 +882,26 @@ PlusStatus ClariusBLE::Connect()
 }
 
 //-----------------------------------------------------------------------------
+PlusStatus ClariusBLE::ForceUnpair()
+{
+  LOG_INFO("Clearing stale BLE pairing cache...");
+  try
+  {
+    if (_impl->DeviceInfo && _impl->DeviceInfo.Pairing().IsPaired())
+    {
+      auto unpairOp = _impl->DeviceInfo.Pairing().UnpairAsync();
+      await_async(unpairOp);
+      LOG_INFO("BLE device unpaired successfully");
+    }
+  }
+  catch (...)
+  {
+    LOG_WARNING("Exception during BLE unpair, continuing...");
+  }
+  return PLUS_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------
 PlusStatus ClariusBLE::CloseConnection()
 {
   if (_impl->PowerService)
