@@ -1433,24 +1433,19 @@ PlusStatus vtkPlusChannel::GetMostRecentTimestamp(double& ts)
       // so we need the previous video timestamp (that should have a timestamp that is smaller than the first tracking data)
       if (videoUid - 1 < this->VideoSource->GetOldestItemUidInBuffer())
       {
-        // No overlap: all video frames are newer than tracker data.
-        // Instead of dropping the frame, use the tracker timestamp so data keeps flowing.
-        // The slight timestamp mismatch is preferable to dropping frames.
-        static vtkIGSIOLogHelper logHelper(30.0, 100000);
-        CUSTOM_RETURN_WITH_FAIL_IF(false, "Tracking and video data not yet overlapping, using latest tracker timestamp");
-        latestVideoTimestamp = latestTrackerTimestamp;
+        // the previous video item does not exist, so there is no overlap between the tracking and video data
+        LOG_ERROR("Failed to get most recent timestamp: no overlap between tracking and video data");
+        return PLUS_FAIL;
       }
-      else if (this->VideoSource->GetTimeStamp(videoUid - 1, latestVideoTimestamp) != ITEM_OK)
+      if (this->VideoSource->GetTimeStamp(videoUid - 1, latestVideoTimestamp) != ITEM_OK)
       {
         LOG_ERROR("Failed to get video buffer timestamp from UID: " << videoUid);
         return PLUS_FAIL;
       }
-      else if (latestVideoTimestamp > latestTrackerTimestamp)
+      if (latestVideoTimestamp > latestTrackerTimestamp)
       {
-        // Still no overlap even with previous frame, use tracker timestamp
-        static vtkIGSIOLogHelper logHelper(30.0, 100000);
-        CUSTOM_RETURN_WITH_FAIL_IF(false, "Tracking and video data not yet overlapping, using latest tracker timestamp");
-        latestVideoTimestamp = latestTrackerTimestamp;
+        LOG_ERROR("Failed to get most recent timestamp: no overlap between tracking and video data");
+        return PLUS_FAIL;
       }
     }
   }
@@ -1470,21 +1465,19 @@ PlusStatus vtkPlusChannel::GetMostRecentTimestamp(double& ts)
       // so we need the previous video timestamp (that should have a timestamp that is smaller than the first field data)
       if (videoUid - 1 < this->VideoSource->GetOldestItemUidInBuffer())
       {
-        // No overlap between field data and video, use field data timestamp to keep data flowing
-        static vtkIGSIOLogHelper logHelper(30.0, 100000);
-        CUSTOM_RETURN_WITH_FAIL_IF(false, "Field and video data not yet overlapping, using latest field data timestamp");
-        latestVideoTimestamp = latestFieldDataTimestamp;
+        // the previous video item does not exist, so there is no overlap between the field data and video data
+        LOG_ERROR("Failed to get most recent timestamp: no overlap between field and video data");
+        return PLUS_FAIL;
       }
-      else if (this->VideoSource->GetTimeStamp(videoUid - 1, latestVideoTimestamp) != ITEM_OK)
+      if (this->VideoSource->GetTimeStamp(videoUid - 1, latestVideoTimestamp) != ITEM_OK)
       {
         LOG_ERROR("Failed to get video buffer timestamp from UID: " << videoUid);
         return PLUS_FAIL;
       }
-      else if (latestVideoTimestamp > latestFieldDataTimestamp)
+      if (latestVideoTimestamp > latestFieldDataTimestamp)
       {
-        static vtkIGSIOLogHelper logHelper(30.0, 100000);
-        CUSTOM_RETURN_WITH_FAIL_IF(false, "Field and video data not yet overlapping, using latest field data timestamp");
-        latestVideoTimestamp = latestFieldDataTimestamp;
+        LOG_ERROR("Failed to get most recent timestamp: no overlap between field and video data");
+        return PLUS_FAIL;
       }
     }
   }
