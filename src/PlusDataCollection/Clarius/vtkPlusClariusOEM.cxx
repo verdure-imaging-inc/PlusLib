@@ -142,6 +142,8 @@ namespace
 
   static const bool DEFAULT_FREEZE_ON_POOR_WIFI_SIGNAL = true;
 
+  static const bool DEFAULT_BANDWIDTH_OPTIMIZATION = false;
+
   static const bool DEFAULT_KEEP_AWAKE_CHARGING = true;
 
   static const bool DEFAULT_POWER_BUTTONS_ENABLED = true;
@@ -262,6 +264,7 @@ protected:
   bool EnableAutoGain;
   bool Enable5v;
   bool FreezeOnPoorWifiSignal;
+  bool BandwidthOptimization;
   bool KeepAwakeCharging;
   bool PowerButtonsEnabled;
   bool SoundEnabled;
@@ -345,6 +348,7 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
   , EnableAutoGain(DEFAULT_ENABLE_AUTO_GAIN)
   , Enable5v(DEFAULT_ENABLE_5V_RAIL)
   , FreezeOnPoorWifiSignal(DEFAULT_FREEZE_ON_POOR_WIFI_SIGNAL)
+  , BandwidthOptimization(DEFAULT_BANDWIDTH_OPTIMIZATION)
   , KeepAwakeCharging(DEFAULT_KEEP_AWAKE_CHARGING)
   , PowerButtonsEnabled(DEFAULT_POWER_BUTTONS_ENABLED)
   , SoundEnabled(DEFAULT_SOUND_ENABLED)
@@ -929,6 +933,7 @@ void vtkPlusClariusOEM::vtkInternal::LogUserSettings()
   ss << "Enable5v: " << (this->Enable5v ? "TRUE" : "FALSE") << std::endl;
   ss << "EnablePenetrationMode: " << (this->EnablePenetrationMode ? "TRUE" : "FALSE") << std::endl;
   ss << "FreezeOnPoorWifiSignal: " << (this->FreezeOnPoorWifiSignal ? "TRUE" : "FALSE") << std::endl;
+  ss << "BandwidthOptimization: " << (this->BandwidthOptimization ? "TRUE" : "FALSE") << std::endl;
   ss << "KeepAwakeCharging: " << (this->KeepAwakeCharging ? "TRUE" : "FALSE") << std::endl;
   ss << "PowerButtonsEnabled: " << (this->PowerButtonsEnabled ? "TRUE" : "FALSE") << std::endl;
   ss << "SoundEnabled: " << (this->SoundEnabled ? "TRUE" : "FALSE") << std::endl;
@@ -1022,6 +1027,7 @@ void vtkPlusClariusOEM::PrintSelf(ostream& os, vtkIndent indent)
   os << indent << "EnableAutoGain: " << (this->Internal->EnableAutoGain ? "TRUE" : "FALSE") << std::endl;
   os << indent << "Enable5v: " << (this->Internal->Enable5v ? "TRUE" : "FALSE") << std::endl;
   os << indent << "FreezeOnPoorWifiSignal: " << (this->Internal->FreezeOnPoorWifiSignal ? "TRUE" : "FALSE") << std::endl;
+  os << indent << "BandwidthOptimization: " << (this->Internal->BandwidthOptimization ? "TRUE" : "FALSE") << std::endl;
   os << indent << "KeepAwakeCharging: " << (this->Internal->KeepAwakeCharging ? "TRUE" : "FALSE") << std::endl;
   os << indent << "PowerButtonsEnabled: " << (this->Internal->PowerButtonsEnabled ? "TRUE" : "FALSE") << std::endl;
   os << indent << "SoundEnabled: " << (this->Internal->SoundEnabled ? "TRUE" : "FALSE") << std::endl;
@@ -1098,6 +1104,10 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   // freeze on poor wifi signal
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(FreezeOnPoorWifiSignal,
     this->Internal->FreezeOnPoorWifiSignal, deviceConfig);
+
+  // bandwidth optimization (auto-downgrades imaging params on poor wifi)
+  XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(BandwidthOptimization,
+    this->Internal->BandwidthOptimization, deviceConfig);
 
   // keep awake when charging
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(KeepAwakeCharging,
@@ -1866,7 +1876,7 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   settings.powerOn = this->Internal->PowerButtonsEnabled;
   settings.sounds = this->Internal->SoundEnabled;
   settings.wakeOnShake = this->Internal->WakeOnShake;
-  // settings.bandwidthOptimization
+  settings.bandwidthOptimization = this->Internal->BandwidthOptimization;
   settings.forceLogSend = this->Internal->ForceLogSend;
   settings.up = static_cast<CusButtonSetting>(this->Internal->UpButtonMode);
   settings.down = static_cast<CusButtonSetting>(this->Internal->DownButtonMode);
