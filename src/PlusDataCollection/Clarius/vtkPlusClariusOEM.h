@@ -86,6 +86,9 @@ protected:
   /*! Send certificate file required for probe use */
   PlusStatus SetClariusCert();
 
+  /*! Auto-renew certificate from Clarius Cloud if expiring soon */
+  PlusStatus AutoRenewCertificate();
+
   /*! Connect and Configure the Clarius probe application */
   PlusStatus ConfigureProbeApplication();
 

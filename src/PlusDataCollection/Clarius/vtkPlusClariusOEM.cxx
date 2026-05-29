@@ -36,6 +36,13 @@
 #include <future>
 #include <map>
 #include <sstream>
+#include <fstream>
+
+// WinHTTP for Clarius Cloud API cert renewal
+#ifdef _WIN32
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
+#endif
 #include <string>
 
 // Clarius enable / disable values
@@ -277,6 +284,9 @@ protected:
   int KeepAwakeTimeoutMin;
   int DeepSleepTimeoutHr;
   bool OptimizeWifiChannel;
+  std::string OEMApiKey;
+  int CertAutoRenewDays;
+  int CertDaysValid;
   bool PowerOffOnDisconnect;
   BUTTON_MODE UpButtonMode;
   BUTTON_MODE DownButtonMode;
@@ -361,6 +371,9 @@ vtkPlusClariusOEM::vtkInternal::vtkInternal(vtkPlusClariusOEM* ext)
   , KeepAwakeTimeoutMin(DEFAULT_KEEP_AWAKE_TIMEOUT_SEC)
   , DeepSleepTimeoutHr(DEFAULT_DEEP_SLEEP_TIMEOUT_HR)
   , OptimizeWifiChannel(false)
+  , OEMApiKey("")
+  , CertAutoRenewDays(30)
+  , CertDaysValid(-1)
   , PowerOffOnDisconnect(false)
   , UpButtonMode(DEFAULT_UP_BUTTON_MODE)
   , DownButtonMode(DEFAULT_DOWN_BUTTON_MODE)
@@ -453,9 +466,23 @@ void vtkPlusClariusOEM::vtkInternal::ConnectFn(CusConnection ret, int port, cons
 //-------------------------------------------------------------------------------------------------
 void vtkPlusClariusOEM::vtkInternal::CertFn(int daysValid)
 {
+  // store for auto-renewal check
+  if (instance != NULL)
+  {
+    instance->Internal->CertDaysValid = daysValid;
+  }
+
   if (daysValid <= 0)
   {
     LOG_ERROR("Invalid or expired certificate provided for Clarius OEM device");
+  }
+  else if (daysValid <= 14)
+  {
+    LOG_WARNING("Clarius certificate expires in " << daysValid << " days! Auto-renewal will be attempted.");
+  }
+  else if (daysValid <= 30)
+  {
+    LOG_WARNING("Clarius certificate expires in " << daysValid << " days");
   }
   else
   {
@@ -1157,6 +1184,14 @@ PlusStatus vtkPlusClariusOEM::ReadConfiguration(vtkXMLDataElement* rootConfigEle
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(OptimizeWifiChannel,
     this->Internal->OptimizeWifiChannel, deviceConfig);
 
+  // OEM API key for auto cert renewal
+  XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(OEMApiKey,
+    this->Internal->OEMApiKey, deviceConfig);
+
+  // cert auto-renew threshold in days
+  XML_READ_SCALAR_ATTRIBUTE_NONMEMBER_OPTIONAL(int, CertAutoRenewDays,
+    this->Internal->CertAutoRenewDays, deviceConfig);
+
   // Power off probe on disconnect (default: FALSE, probe stays on)
   XML_READ_BOOL_ATTRIBUTE_NONMEMBER_OPTIONAL(PowerOffOnDisconnect,
     this->Internal->PowerOffOnDisconnect, deviceConfig);
@@ -1621,6 +1656,154 @@ PlusStatus vtkPlusClariusOEM::SetClariusCert()
   return PLUS_SUCCESS;
 }
 
+
+//-------------------------------------------------------------------------------------------------
+PlusStatus vtkPlusClariusOEM::AutoRenewCertificate()
+{
+#ifdef _WIN32
+  LOG_INFO("Attempting auto-renewal of Clarius certificate for probe " << this->Internal->ProbeSerialNum);
+
+  // Build auth header
+  std::string apiKey = this->Internal->OEMApiKey;
+  if (apiKey.empty())
+  {
+    LOG_WARNING("OEMApiKey not configured, cannot auto-renew certificate");
+    return PLUS_FAIL;
+  }
+
+  HINTERNET hSession = WinHttpOpen(L"SpineUS/1.0",
+    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!hSession)
+  {
+    LOG_ERROR("WinHttpOpen failed for cert renewal");
+    return PLUS_FAIL;
+  }
+
+  HINTERNET hConnect = WinHttpConnect(hSession, L"cloud.clarius.com",
+    INTERNET_DEFAULT_HTTPS_PORT, 0);
+  if (!hConnect)
+  {
+    WinHttpCloseHandle(hSession);
+    LOG_ERROR("WinHttpConnect failed for cert renewal");
+    return PLUS_FAIL;
+  }
+
+  HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
+    L"/api/public/v0/devices/oem/", NULL, WINHTTP_NO_REFERER,
+    WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+  if (!hRequest)
+  {
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    LOG_ERROR("WinHttpOpenRequest failed for cert renewal");
+    return PLUS_FAIL;
+  }
+
+  // Add authorization header
+  std::wstring authHeader = L"Authorization: OEM-API-Key ";
+  for (char c : apiKey) { authHeader += static_cast<wchar_t>(c); }
+  WinHttpAddRequestHeaders(hRequest, authHeader.c_str(), -1, WINHTTP_ADDREQ_FLAG_ADD);
+
+  // Send request
+  if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0) ||
+      !WinHttpReceiveResponse(hRequest, NULL))
+  {
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    LOG_ERROR("Clarius Cloud API request failed for cert renewal");
+    return PLUS_FAIL;
+  }
+
+  // Read response
+  std::string response;
+  DWORD bytesRead = 0;
+  char buffer[4096];
+  while (WinHttpReadData(hRequest, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0)
+  {
+    buffer[bytesRead] = '\0';
+    response += buffer;
+    bytesRead = 0;
+  }
+
+  WinHttpCloseHandle(hRequest);
+  WinHttpCloseHandle(hConnect);
+  WinHttpCloseHandle(hSession);
+
+  // Find cert for our serial number
+  std::string serial = this->Internal->ProbeSerialNum;
+  size_t serialPos = response.find(serial);
+  if (serialPos == std::string::npos)
+  {
+    LOG_WARNING("Probe " << serial << " not found in Clarius Cloud API response");
+    return PLUS_FAIL;
+  }
+
+  // Find the "crt" field near this serial
+  // Look backwards for the start of this result object to find its crt field
+  size_t crtKey = response.rfind("\"crt\"", serialPos);
+  if (crtKey == std::string::npos)
+  {
+    // crt might be after serial in the JSON
+    crtKey = response.find("\"crt\"", serialPos);
+  }
+  if (crtKey == std::string::npos)
+  {
+    LOG_WARNING("No certificate data found for probe " << serial);
+    return PLUS_FAIL;
+  }
+
+  // Extract cert value: find the string after "crt": "
+  size_t certStart = response.find("\"", crtKey + 5);  // skip past "crt"
+  if (certStart == std::string::npos) { return PLUS_FAIL; }
+  // Check for null value
+  if (response.substr(crtKey + 4, 6).find("null") != std::string::npos)
+  {
+    LOG_WARNING("Certificate for probe " << serial << " is null in Clarius Cloud");
+    return PLUS_FAIL;
+  }
+  certStart++; // skip opening quote
+  size_t certEnd = response.find("\"", certStart);
+  if (certEnd == std::string::npos) { return PLUS_FAIL; }
+
+  std::string certPem = response.substr(certStart, certEnd - certStart);
+
+  // Unescape \\n to actual newlines
+  std::string certClean;
+  for (size_t i = 0; i < certPem.size(); i++)
+  {
+    if (i + 1 < certPem.size() && certPem[i] == '\\' && certPem[i + 1] == 'n')
+    {
+      certClean += '\n';
+      i++;
+    }
+    else
+    {
+      certClean += certPem[i];
+    }
+  }
+
+  // Save to cert path
+  std::string fullCertPath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(
+    this->Internal->PathToCert);
+  std::ofstream outFile(fullCertPath);
+  if (!outFile.is_open())
+  {
+    LOG_ERROR("Failed to open cert file for writing: " << fullCertPath);
+    return PLUS_FAIL;
+  }
+  outFile << certClean;
+  outFile.close();
+
+  LOG_INFO("Successfully auto-renewed Clarius certificate for probe " << serial
+    << " saved to " << fullCertPath);
+  return PLUS_SUCCESS;
+#else
+  LOG_WARNING("Auto certificate renewal is only supported on Windows");
+  return PLUS_FAIL;
+#endif
+}
+
 //-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::ConfigureProbeApplication()
 {
@@ -1860,6 +2043,24 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     LOG_ERROR("Failed to set Clarius certificate. Please check your PathToCert is valid, and contains the correct cert for the probe you're connecting to");
     this->InternalDisconnect();
     return PLUS_FAIL;
+  }
+
+  // AUTO-RENEW CERTIFICATE IF EXPIRING SOON
+  if (this->Internal->CertDaysValid > 0 &&
+      this->Internal->CertDaysValid <= this->Internal->CertAutoRenewDays &&
+      !this->Internal->OEMApiKey.empty())
+  {
+    LOG_INFO("Certificate expires in " << this->Internal->CertDaysValid
+      << " days (threshold: " << this->Internal->CertAutoRenewDays
+      << "), attempting auto-renewal...");
+    if (this->AutoRenewCertificate() == PLUS_SUCCESS)
+    {
+      LOG_INFO("Certificate renewed successfully. New cert will be used on next connection.");
+    }
+    else
+    {
+      LOG_WARNING("Certificate auto-renewal failed. Please renew manually before expiration.");
+    }
   }
 
   // CONFIGURE PROBE SETTINGS
