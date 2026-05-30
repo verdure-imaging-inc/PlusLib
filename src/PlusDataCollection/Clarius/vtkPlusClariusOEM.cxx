@@ -961,6 +961,8 @@ void vtkPlusClariusOEM::vtkInternal::LogUserSettings()
   ss << "EnablePenetrationMode: " << (this->EnablePenetrationMode ? "TRUE" : "FALSE") << std::endl;
   ss << "FreezeOnPoorWifiSignal: " << (this->FreezeOnPoorWifiSignal ? "TRUE" : "FALSE") << std::endl;
   ss << "BandwidthOptimization: " << (this->BandwidthOptimization ? "TRUE" : "FALSE") << std::endl;
+  ss << "OEMApiKey: " << (this->OEMApiKey.empty() ? "NOT SET" : "SET") << std::endl;
+  ss << "CertAutoRenewDays: " << this->CertAutoRenewDays << std::endl;
   ss << "KeepAwakeCharging: " << (this->KeepAwakeCharging ? "TRUE" : "FALSE") << std::endl;
   ss << "PowerButtonsEnabled: " << (this->PowerButtonsEnabled ? "TRUE" : "FALSE") << std::endl;
   ss << "SoundEnabled: " << (this->SoundEnabled ? "TRUE" : "FALSE") << std::endl;
