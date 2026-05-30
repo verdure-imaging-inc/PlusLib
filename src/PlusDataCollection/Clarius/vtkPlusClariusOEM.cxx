@@ -2052,24 +2052,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     return PLUS_FAIL;
   }
 
-  // AUTO-RENEW CERTIFICATE IF EXPIRING SOON
-  if (this->Internal->CertDaysValid > 0 &&
-      this->Internal->CertDaysValid <= this->Internal->CertAutoRenewDays &&
-      !this->Internal->OEMApiKey.empty())
-  {
-    LOG_INFO("Certificate expires in " << this->Internal->CertDaysValid
-      << " days (threshold: " << this->Internal->CertAutoRenewDays
-      << "), attempting auto-renewal...");
-    if (this->AutoRenewCertificate() == PLUS_SUCCESS)
-    {
-      LOG_INFO("Certificate renewed successfully. New cert will be used on next connection.");
-    }
-    else
-    {
-      LOG_WARNING("Certificate auto-renewal failed. Please renew manually before expiration.");
-    }
-  }
-
   // CONFIGURE PROBE SETTINGS
   CusProbeSettings settings;
   settings.contactDetection = this->Internal->ContactDetectionTimeoutSec;
@@ -2104,6 +2086,25 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     LOG_ERROR("Failed to configure Clarius probe application");
     this->InternalDisconnect();
     return PLUS_FAIL;
+  }
+
+  // AUTO-RENEW CERTIFICATE IF EXPIRING SOON
+  // (runs after connection so CertFn has populated CertDaysValid)
+  if (this->Internal->CertDaysValid > 0 &&
+      this->Internal->CertDaysValid <= this->Internal->CertAutoRenewDays &&
+      !this->Internal->OEMApiKey.empty())
+  {
+    LOG_INFO("Certificate expires in " << this->Internal->CertDaysValid
+      << " days (threshold: " << this->Internal->CertAutoRenewDays
+      << "), attempting auto-renewal...");
+    if (this->AutoRenewCertificate() == PLUS_SUCCESS)
+    {
+      LOG_INFO("Certificate renewed successfully. New cert will be used on next connection.");
+    }
+    else
+    {
+      LOG_WARNING("Certificate auto-renewal failed. Please renew manually before expiration.");
+    }
   }
 
   // PRINT DEVICE STATS AND PROBE INFO
