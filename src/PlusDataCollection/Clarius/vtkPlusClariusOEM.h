@@ -89,6 +89,9 @@ protected:
   /*! Auto-renew certificate from Clarius Cloud if expiring soon */
   PlusStatus AutoRenewCertificate();
 
+  /*! Read days remaining from the local cert file (before connecting). Returns -1 if unreadable. */
+  int GetLocalCertDaysRemaining();
+
   /*! Connect and Configure the Clarius probe application */
   PlusStatus ConfigureProbeApplication();
 

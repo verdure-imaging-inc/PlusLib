@@ -42,6 +42,8 @@
 #ifdef _WIN32
 #include <winhttp.h>
 #pragma comment(lib, "winhttp.lib")
+#include <wincrypt.h>
+#pragma comment(lib, "crypt32.lib")
 #endif
 #include <string>
 
@@ -1660,6 +1662,61 @@ PlusStatus vtkPlusClariusOEM::SetClariusCert()
 
 
 //-------------------------------------------------------------------------------------------------
+int vtkPlusClariusOEM::GetLocalCertDaysRemaining()
+{
+#ifdef _WIN32
+  std::string fullCertPath = vtkPlusConfig::GetInstance()->GetDeviceSetConfigurationPath(
+    this->Internal->PathToCert);
+  std::ifstream certFile(fullCertPath, std::ios::binary);
+  if (!certFile.is_open())
+  {
+    LOG_WARNING("Could not open local cert to check expiry: " << fullCertPath);
+    return -1;
+  }
+  std::string pem((std::istreambuf_iterator<char>(certFile)), std::istreambuf_iterator<char>());
+  certFile.close();
+
+  // PEM (base64 with header) -> DER
+  DWORD derLen = 0;
+  if (!CryptStringToBinaryA(pem.c_str(), (DWORD)pem.size(), CRYPT_STRING_BASE64HEADER,
+        NULL, &derLen, NULL, NULL))
+  {
+    LOG_WARNING("Could not decode local cert PEM for expiry check");
+    return -1;
+  }
+  std::vector<BYTE> der(derLen);
+  if (!CryptStringToBinaryA(pem.c_str(), (DWORD)pem.size(), CRYPT_STRING_BASE64HEADER,
+        der.data(), &derLen, NULL, NULL))
+  {
+    return -1;
+  }
+
+  PCCERT_CONTEXT ctx = CertCreateCertificateContext(
+    X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, der.data(), derLen);
+  if (!ctx)
+  {
+    LOG_WARNING("Could not parse local cert for expiry check");
+    return -1;
+  }
+
+  FILETIME notAfter = ctx->pCertInfo->NotAfter;
+  FILETIME now;
+  GetSystemTimeAsFileTime(&now);
+  CertFreeCertificateContext(ctx);
+
+  ULARGE_INTEGER ulAfter, ulNow;
+  ulAfter.LowPart = notAfter.dwLowDateTime; ulAfter.HighPart = notAfter.dwHighDateTime;
+  ulNow.LowPart = now.dwLowDateTime; ulNow.HighPart = now.dwHighDateTime;
+  if (ulAfter.QuadPart <= ulNow.QuadPart) { return 0; }
+  ULONGLONG diff = ulAfter.QuadPart - ulNow.QuadPart; // 100-ns units
+  int days = (int)(diff / (10000000ULL * 60 * 60 * 24));
+  return days;
+#else
+  return -1;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
 PlusStatus vtkPlusClariusOEM::AutoRenewCertificate()
 {
 #ifdef _WIN32
@@ -2005,6 +2062,32 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
   // log user settings for debugging
   this->Internal->LogUserSettings();
 
+
+  // CHECK & AUTO-RENEW CERTIFICATE BEFORE TOUCHING THE PROBE WIFI
+  // Must happen here: once we join the probe's WiFi AP, a WiFi-only PC
+  // loses its internet route and cannot reach the Clarius Cloud API.
+  if (!this->Internal->OEMApiKey.empty())
+  {
+    int localDays = this->GetLocalCertDaysRemaining();
+    if (localDays >= 0)
+    {
+      LOG_INFO("Local Clarius certificate has " << localDays << " days remaining");
+      if (localDays <= this->Internal->CertAutoRenewDays)
+      {
+        LOG_INFO("Certificate within renewal threshold (" << this->Internal->CertAutoRenewDays
+          << " days), renewing now while internet is available...");
+        if (this->AutoRenewCertificate() == PLUS_SUCCESS)
+        {
+          LOG_INFO("Certificate renewed successfully and will be used for this session.");
+        }
+        else
+        {
+          LOG_WARNING("Certificate auto-renewal failed. Proceeding with existing certificate.");
+        }
+      }
+    }
+  }
+
   // BLE
   if (this->InitializeBLE() != PLUS_SUCCESS)
   {
@@ -2086,25 +2169,6 @@ PlusStatus vtkPlusClariusOEM::InternalConnect()
     LOG_ERROR("Failed to configure Clarius probe application");
     this->InternalDisconnect();
     return PLUS_FAIL;
-  }
-
-  // AUTO-RENEW CERTIFICATE IF EXPIRING SOON
-  // (runs after connection so CertFn has populated CertDaysValid)
-  if (this->Internal->CertDaysValid > 0 &&
-      this->Internal->CertDaysValid <= this->Internal->CertAutoRenewDays &&
-      !this->Internal->OEMApiKey.empty())
-  {
-    LOG_INFO("Certificate expires in " << this->Internal->CertDaysValid
-      << " days (threshold: " << this->Internal->CertAutoRenewDays
-      << "), attempting auto-renewal...");
-    if (this->AutoRenewCertificate() == PLUS_SUCCESS)
-    {
-      LOG_INFO("Certificate renewed successfully. New cert will be used on next connection.");
-    }
-    else
-    {
-      LOG_WARNING("Certificate auto-renewal failed. Please renew manually before expiration.");
-    }
   }
 
   // PRINT DEVICE STATS AND PROBE INFO
