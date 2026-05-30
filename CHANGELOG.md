@@ -12,15 +12,19 @@ Base: PLUS Toolkit 2.9.0 (Queen's University PerkLab). All changes live on the `
 
 ---
 
+## [1.1.0] - 2026-05-30
+
+### Added
+- **Clarius certificate auto-renewal.** On probe connection, the server checks the certificate expiry and, if within the renewal threshold, automatically pulls a fresh certificate from the Clarius Cloud API (scoped to the connected probe''s serial number via `?serial=`) and saves it to `PathToCert`. New XML attributes: `OEMApiKey`, `CertAutoRenewDays` (default 30). Warning logs fire at 30 and 14 days remaining; renewal status is logged on connection. (PlusLib)
+- Certificate configuration (`OEMApiKey` SET/NOT SET, `CertAutoRenewDays`) now reported in the server settings log on startup. (PlusLib)
+
 ## [1.0.5] - 2026-05-29
 
 ### Added
-- **Clarius certificate auto-renewal.** On probe connection, the server checks the certificate expiry and, if within the renewal threshold, automatically pulls a fresh certificate from the Clarius Cloud API (scoped to the connected probe''s serial number) and saves it to `PathToCert`. New XML attributes: `OEMApiKey`, `CertAutoRenewDays` (default 30). Warning logs fire at 30 and 14 days remaining. (PlusLib)
 - **`BandwidthOptimization` XML attribute** (default FALSE). Exposes the Solum SDK `bandwidthOptimization` setting. When FALSE, prevents the SDK from auto-downgrading imaging parameters on low WiFi bandwidth, eliminating periodic frame-rate drops during scanning. (PlusLib)
 
 ### Changed
-- **Full SpineUS rebrand.** All user-visible "Plus" branding removed: installer, launcher EXE (now `SpineUSServer.exe`), window title, tray, icons, license agreement, and shortcuts all rebranded to SpineUS / Verdure Imaging.
-- Version string in launcher title bar updated to v1.0.5. (PlusApp)
+- **Full SpineUS rebrand.** All user-visible "Plus" branding removed: installer (`SpineUS-Server-1.0.5-Win64.exe`), launcher EXE (now `SpineUSServer.exe`), window title, tray, icons, license agreement, and shortcuts all rebranded to SpineUS / Verdure Imaging.
 
 ---
 
