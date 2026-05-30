@@ -1688,8 +1688,13 @@ PlusStatus vtkPlusClariusOEM::AutoRenewCertificate()
     return PLUS_FAIL;
   }
 
+  // Build request path filtered by this probe's serial number
+  // so we only fetch the one cert we need, not the whole account
+  std::wstring reqPath = L"/api/public/v0/devices/oem/?serial=";
+  for (char c : this->Internal->ProbeSerialNum) { reqPath += static_cast<wchar_t>(c); }
+
   HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
-    L"/api/public/v0/devices/oem/", NULL, WINHTTP_NO_REFERER,
+    reqPath.c_str(), NULL, WINHTTP_NO_REFERER,
     WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
   if (!hRequest)
   {
