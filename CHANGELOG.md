@@ -12,6 +12,11 @@ Base: PLUS Toolkit 2.9.0 (Queen's University PerkLab). All changes live on the `
 
 ---
 
+## [1.1.2] - 2026-05-30
+
+### Fixed
+- **Certificate renewal now runs before joining the probe WiFi.** The probe is its own WiFi access point; on a PC without wired internet, joining it drops the internet route, so renewal against the Clarius Cloud API could never succeed post-connection. The cert expiry is now read directly from the local `.pem` (Windows CryptoAPI) at the start of connection, and renewal happens while internet is still available. The fresh certificate is used for the current session. (PlusLib)
+
 ## [1.1.1] - 2026-05-30
 
 ### Fixed
