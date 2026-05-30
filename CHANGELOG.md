@@ -12,6 +12,12 @@ Base: PLUS Toolkit 2.9.0 (Queen's University PerkLab). All changes live on the `
 
 ---
 
+## [1.1.1] - 2026-05-30
+
+### Fixed
+- **Certificate auto-renewal timing.** The renewal check ran before the certificate-validation callback populated the days-remaining value, so it never triggered. Moved the check to after probe connection completes. Auto-renewal now fires correctly when the certificate is within the `CertAutoRenewDays` threshold. (PlusLib)
+- Installer EXE icon (`MUI_ICON`/`MUI_UNICON`) now embedded in the NSIS package; previously only the header/sidebar bitmaps were branded and the installer file showed the default icon. (Build)
+
 ## [1.1.0] - 2026-05-30
 
 ### Added
