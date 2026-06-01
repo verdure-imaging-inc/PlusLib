@@ -12,6 +12,11 @@ Base: PLUS Toolkit 2.9.0 (Queen's University PerkLab). All changes live on the `
 
 ---
 
+## [1.2.0] - 2026-05-31
+
+### Changed
+- **Default `CertAutoRenewDays` lowered from 30 to 15.** Aligns the connection-time renewal threshold with the new launcher background certificate check (PlusApp 1.2.0), so a certificate is only pulled when it is genuinely close to expiry. Operators should connect the server computer to the internet at least once every two weeks. (PlusLib)
+
 ## [1.1.2] - 2026-05-30
 
 ### Fixed
